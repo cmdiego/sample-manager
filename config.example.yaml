@@ -1,0 +1,14 @@
+# Sample Manager configuration
+# Location: ~/.sample_manager/config.yaml
+
+db_path: "~/.sample_manager/sample_manager.sqlite3"
+
+library_roots: []
+default_library_root: null
+
+defaults:
+  export_mode: "copy"          # copy | symlink
+  collision_policy: "suffix"   # fail | suffix | dedupe_hash
+  on_violation: "autofix"      # autofix | fail
+  preview_format: "table"      # table | json
+  confirmations: true
