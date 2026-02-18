@@ -1,3 +1,4 @@
+# docs/03-cli.md
 # CLI Surface
 
 ## 1) Command philosophy
@@ -14,52 +15,41 @@ Executable name (placeholder): `sample`
 ### Init / Config
 - `sample init`
   - Creates `~/.sample_manager/` and `config.yaml` if missing (idempotent).
-  - Does not overwrite an existing config.
+  - Does not overwrite existing config.yaml.
 - `sample config validate [--strict] [--json]`
-  - Validates paths from config:
-    - db_path parent directory exists (may create parent dir if safe)
-    - each library_roots entry exists and is a directory
-    - default_library_root (if set) exists and is a directory
-    - default_library_root should match one normalized library_roots entry (warn if not)
-  - Default behavior: warnings do not fail the command.
-  - `--strict` exits non-zero if any validation error exists.
+  - Validates configured paths.
+  - Default: warn and continue (exit code 0).
+  - Strict: fail with exit code 6 if errors exist.
 - `sample config show [--json]`
-  - Prints the effective configuration after normalization (expanded ~, env vars).
-- `sample config set <key> <value>`
-  - Explicitly updates config (may rewrite YAML).
-  - Example keys:
-    - db_path
-    - defaults.export_mode
-    - defaults.preview_format
-    - defaults.confirmations
-    - defaults.strict_paths
-- `sample config add-root <path> [--set-default]`
-  - Normalizes and adds a library root (must exist and be a directory).
-- `sample config remove-root <path>`
-  - Removes a library root by normalized match.
-- `sample config set-default <path>`
-  - Sets default_library_root to an existing configured root.
-
-Notes:
-- Config validation SHOULD run automatically before executing other commands.
-  - If invalid paths are found:
-    - default: warn and proceed with valid paths only
-    - strict mode (defaults.strict_paths or --strict): exit non-zero
+  - Shows effective config with normalized paths.
 
 ### Library
 - `sample scan <path> [--rescan] [--fast]`
 - `sample status`
 - `sample browse [--page N --page-size M] [--sort name|mtime|size]`
-- `sample search [--name <glob|regex>] [--tag <tag>] [--category <cat>] [--pack <pack>] [--bpm 120-130] [--key Cm]`
+- `sample search ...`
+  - By name pattern, path, tags, etc. (phased in later)
 
-### Tags
+### Tags (UPDATED semantics)
 - `sample tag add <sample-id> <tag>`
 - `sample tag remove <sample-id> <tag>`
 - `sample tag bulk --from-search "<query>" --add <tag> [--remove <tag>]`
 
+Tag resolution rules (Phase 2 DB update):
+- Tag lookup is case-insensitive and may resolve via (in this order if needed):
+  1) tag.name_norm
+  2) tag.shorthand_norm
+  3) tag_alias.alias_norm
+- Tag soft delete:
+  - tag.is_hidden=1 means tag is hidden from default list/resolve unless include_hidden=true.
+- Tag inheritance:
+  - tag_parent edges define a DAG (child -> parent).
+  - Searching/filtering by a tag expands to include descendant tags (parent matches descendants only).
+  - Cycles are forbidden (cycle check before inserting an edge).
+
 ### Profiles
 - `sample profile list`
-- `sample profile show <profile-name>`
+- `sample profile show <name>`
 - `sample export-profile list`
 - `sample export-profile show <name>`
 
@@ -72,9 +62,8 @@ Notes:
 
 ### Export / Revert
 - `sample export <arrangement-name> --to <export-dir> --export-profile <name> [--mode copy|symlink|move] [--confirm]`
-- `sample export last`
 - `sample revert --export-id <id> [--confirm] [--continue-on-error]`
-- `sample revert last [--confirm]`
+- `sample revert last [--confirm]` (optional if supported)
 
 ## 3) Exit codes (suggested)
 - 0 success

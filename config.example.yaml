@@ -6,6 +6,9 @@ db_path: "~/.sample_manager/sample_manager.sqlite3"
 library_roots: []
 default_library_root: null
 
+# Directory containing arrangement_profiles.yaml and export_profiles.yaml
+profiles_dir: "~/.sample_manager/profiles"
+
 defaults:
   export_mode: "copy"          # copy | symlink
   collision_policy: "suffix"   # fail | suffix | dedupe_hash

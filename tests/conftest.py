@@ -3,6 +3,9 @@
 import pytest
 from pathlib import Path
 
+from sample_manager.db import Db
+from sample_manager.migrations import apply_migrations
+
 
 @pytest.fixture
 def tmp_home(tmp_path, monkeypatch):
@@ -46,3 +49,17 @@ def cli_runner():
     """Typer CliRunner for testing CLI commands."""
     from typer.testing import CliRunner
     return CliRunner()
+
+
+@pytest.fixture
+def db(tmp_path):
+    """Fresh SQLite DB with Phase 2 schema applied (Migration 0001).
+
+    Yields a connected Db instance; closes on teardown.
+    """
+    db_path = tmp_path / "test.sqlite3"
+    database = Db(db_path)
+    database.connect()
+    apply_migrations(database)
+    yield database
+    database.close()

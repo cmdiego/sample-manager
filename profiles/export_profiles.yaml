@@ -1,0 +1,27 @@
+# Export Profiles
+# Each entry defines hardware/filesystem constraints for export targets.
+#
+# Required fields: name, max_depth, max_filename_len, illegal_chars
+# Optional fields: allowed_charset, replace_char, case_policy,
+#                  path_sep_policy, on_violation
+#
+# Example:
+# - name: "mpc-live"
+#   max_depth: 3
+#   max_filename_len: 64
+#   illegal_chars: '<>:"/\\|?*'
+#   replace_char: "_"
+#   case_policy: "preserve"
+#   path_sep_policy: "posix"
+#   on_violation: "autofix"
+#
+# - name: "sp-404"
+#   max_depth: 2
+#   max_filename_len: 32
+#   illegal_chars: '<>:"/\\|?*'
+#   replace_char: "_"
+#   case_policy: "upper"
+#   path_sep_policy: "posix"
+#   on_violation: "fail"
+
+[]

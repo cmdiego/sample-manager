@@ -47,6 +47,7 @@ def get_default_config_template() -> dict:
         "db_path": "~/.sample_manager/sample_manager.sqlite3",
         "library_roots": [],
         "default_library_root": None,
+        "profiles_dir": "~/.sample_manager/profiles",
         "defaults": {
             "export_mode": "copy",
             "collision_policy": "suffix",
@@ -139,6 +140,12 @@ def normalize_config(config: dict) -> dict:
             normalize_path(normalized["default_library_root"])
         )
     
+    # Normalize profiles_dir
+    if normalized.get("profiles_dir"):
+        normalized["profiles_dir"] = str(
+            normalize_path(normalized["profiles_dir"])
+        )
+    
     # Preserve defaults as-is
     if "defaults" in config:
         normalized["defaults"] = config["defaults"].copy()
@@ -204,6 +211,20 @@ def validate_config(config: dict, strict: bool = False) -> ValidationResult:
         elif default_root not in valid_roots:
             warnings.append(
                 f"default_library_root not in library_roots: {default_root}"
+            )
+    
+    # 4. Validate profiles_dir (WARN only — it's optional)
+    checked.append("profiles_dir")
+    profiles_dir = normalized.get("profiles_dir")
+    if profiles_dir:
+        profiles_path = Path(profiles_dir)
+        if not profiles_path.exists():
+            warnings.append(
+                f"profiles_dir does not exist: {profiles_dir}"
+            )
+        elif not profiles_path.is_dir():
+            warnings.append(
+                f"profiles_dir is not a directory: {profiles_dir}"
             )
     
     # Compute result

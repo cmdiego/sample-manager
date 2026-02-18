@@ -1,0 +1,34 @@
+# Arrangement Profiles
+# Each entry defines how samples are organized into output folders.
+#
+# Required fields: name, layout_mode, naming_template, collision_policy
+# Optional fields: description, layout_rules, selection_defaults
+#
+# Example:
+# - name: "default-monolithic"
+#   description: "Flat bucket layout for hardware samplers"
+#   layout_mode: "monolithic"
+#   layout_rules:
+#     category_map:
+#       kick: "KICKS"
+#       snare: "SNARES"
+#       hat: "HATS"
+#       clap: "CLAPS"
+#       perc: "PERC"
+#       fx: "FX"
+#       vocal: "VOCALS"
+#       bass: "BASS"
+#       synth: "SYNTH"
+#       loop: "LOOPS"
+#   naming_template: "{category}/{name}"
+#   collision_policy: "suffix"
+#
+# - name: "vendor-hierarchy"
+#   description: "Nested by vendor and pack"
+#   layout_mode: "hierarchical"
+#   layout_rules:
+#     folder_template: "{pack}/{category}"
+#   naming_template: "{pack}/{category}/{name}"
+#   collision_policy: "dedupe_hash"
+
+[]

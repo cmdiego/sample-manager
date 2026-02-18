@@ -1,3 +1,4 @@
+# docs/05-export-revert.md
 # Export & Revert
 
 ## 1) Export workflow (high-level)
@@ -7,76 +8,56 @@ Inputs:
 - export_profile
 - mode: copy | symlink | move (move requires explicit opt-in)
 
+DB-alignment notes (UPDATED):
+- IDs are SQLite ints.
+- ExportRun and HistoryEntry are persisted in SQLite.
+- HistoryEntry.plan_json is the source of truth for revert.
+
 Steps:
-1) Load Arrangement + Sample selection from DB.
+1) Load Arrangement + Sample selection from DB (selection uses sample_id ints).
 2) Compute Plan using ArrangementEngine (docs/04-arrangement.md).
 3) If Plan invalid -> fail with errors.
 4) Preview (optional) is printing Plan.
-5) Apply:
-   - Create directories (mkdir ops)
-   - Execute file ops (copy/symlink/move)
-   - Collect stats + errors
-6) Persist ExportRun + HistoryEntry(plan_json, stats_json, errors_json)
+5) Apply filesystem operations (copy/symlink/move).
+6) Persist ExportRun + HistoryEntry(plan_json, stats_json, errors_json).
 7) Return export_id.
 
-### Apply rules
-- Idempotency:
-  - If dst exists and matches expected artifact:
-    - copy: allow overwrite only with --force (default: fail)
-    - symlink: if correct link already exists, treat as success
-- Use atomic strategies where possible:
-  - write temp then rename for copies (optional)
-- Always record partial failures.
-
 ## 2) Revert workflow (high-level)
-Revert uses HistoryEntry.plan_json for the selected export_id (or last export).
-
-Modes:
-- Default assumes export_dir is a sandbox of artifacts:
-  - For copy/symlink: revert = delete artifacts created in export_dir
-- If move was used:
-  - revert must move files back to original locations
-  - must handle collisions on restore
+Inputs:
+- export_id (or last export)
 
 Steps:
-1) Resolve export_id (explicit or last).
-2) Load ExportRun + HistoryEntry.
-3) Safety confirmation:
-   - require --confirm unless config disables confirmations
-4) Execute inverse operations in reverse order:
-   - reverse mkdirs after file removals
-   - reverse copy/symlink by deleting dst
-   - reverse move by moving dst back to src
-5) On missing files:
-   - if --continue-on-error: record error and proceed
-   - else: stop and mark partial
-6) Update ExportRun.status:
-   - reverted | partial | failed
+1) Confirm user intent (unless confirmations disabled).
+2) Load HistoryEntry(plan_json) for the export.
+3) Compute inverse operations (reverse order).
+4) Execute inverse operations:
+   - remove created symlinks/copied files
+   - restore moved/renamed files if move mode was used
+5) Record status:
+   - reverted / partial / failed
+6) Return exit code:
+   - 0 success
+   - 5 partial revert (if partial semantics used)
+   - 1 unexpected error
 
 ## 3) Edge cases & policies
-
-### Missing artifacts during revert
-- If dst missing: record warning/error, continue based on flag.
-
-### External modifications
-- If dst exists but differs:
-  - copy: if hash mismatch and no --force-delete, fail or warn (configurable)
-  - symlink: if link points elsewhere, warn and skip unless --force
-
-### Restore collisions (move-mode revert)
-If original src path is now occupied:
-- policy:
-  - fail
-  - suffix_restore: move restored file to src + ".restored_{n}"
-- must be deterministic and reported.
-
-### Partial success guarantee
-Revert must be safe to re-run:
-- If some artifacts already deleted, re-run should succeed (or produce only warnings).
+- Missing files during export:
+  - record as error; continue or fail based on policy
+- Existing destination file:
+  - require confirmation or fail depending on policy
+- Partial export:
+  - HistoryEntry records per-op results; revert uses what actually happened
+- Revert idempotency:
+  - second revert should be safe (no-op removals tolerated)
 
 ## 4) History JSON shape (plan_json)
-History stores:
+HistoryEntry.plan_json stores:
+- export_id
 - export_dir
-- resolved absolute src/dst paths for each op
-- operation ordering and notes
-This avoids recomputing anything during revert.
+- export_profile_id/name
+- plan (operations, warnings, errors)
+- execution results (optional):
+  - per operation: success/failure + message
+
+Notes:
+- Plan remains deterministic; history captures actual execution outcomes.
