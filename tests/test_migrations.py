@@ -28,18 +28,18 @@ class TestEnsureSchemaVersion:
 
 
 class TestApplyMigrations:
-    def test_fresh_db_reaches_version_2(self, tmp_path):
+    def test_fresh_db_reaches_version_4(self, tmp_path):
         with Db(tmp_path / "test.sqlite3") as db:
             final = apply_migrations(db)
-            assert final == 2
+            assert final == 4
             stored = db.fetchval("SELECT version FROM schema_version")
-            assert stored == 2
+            assert stored == 4
 
     def test_idempotent_double_apply(self, tmp_path):
         with Db(tmp_path / "test.sqlite3") as db:
             apply_migrations(db)
             final = apply_migrations(db)
-            assert final == 2
+            assert final == 4
 
     def test_all_tables_exist(self, tmp_path):
         expected_tables = {
@@ -52,6 +52,9 @@ class TestApplyMigrations:
             "tag_parent",
             "arrangement",
             "arrangement_sample",
+            "selection_sample",
+            "export_run",
+            "history_entry",
         }
         with Db(tmp_path / "test.sqlite3") as db:
             apply_migrations(db)
@@ -85,6 +88,12 @@ class TestApplyMigrations:
             "idx_arrangement_name_norm",
             "idx_arrangement_sample_arrangement_id",
             "idx_arrangement_sample_sample_id",
+            # selection indexes
+            "idx_selection_sample_created_at",
+            # export/history indexes
+            "idx_export_run_arrangement_id",
+            "idx_export_run_status",
+            "idx_history_entry_export_id",
         }
         with Db(tmp_path / "test.sqlite3") as db:
             apply_migrations(db)
@@ -99,13 +108,13 @@ class TestApplyMigrations:
                 f"Missing indexes: {expected_indexes - actual_indexes}"
             )
 
-    def test_schema_version_starts_zero_then_two(self, tmp_path):
+    def test_schema_version_starts_zero_then_four(self, tmp_path):
         with Db(tmp_path / "test.sqlite3") as db:
             v0 = ensure_schema_version(db)
             assert v0 == 0
             apply_migrations(db)
-            v2 = db.fetchval("SELECT version FROM schema_version")
-            assert v2 == 2
+            v4 = db.fetchval("SELECT version FROM schema_version")
+            assert v4 == 4
 
 
 class TestMigration0001Constraints:

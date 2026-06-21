@@ -51,6 +51,13 @@ arrangement_app = typer.Typer(
 )
 app.add_typer(arrangement_app, name="arrangement")
 
+# Selection subcommand group
+selection_app = typer.Typer(
+    name="selection",
+    help="Selection buffer commands"
+)
+app.add_typer(selection_app, name="selection")
+
 # Tag subcommand group (Phase 5)
 tag_app = typer.Typer(
     name="tag",
@@ -778,133 +785,16 @@ def export_profile_show(
 
 # ============================= Arrangement commands ==========================
 
+from .commands.arrangement_commands import register as register_arrangement_commands
 
-def _parse_sample_ids_args(raw_values: Optional[list[str]]) -> list[int]:
-    """Parse --from-ids values (comma-separated and/or repeatable)."""
-    if not raw_values:
-        return []
-
-    parsed: list[int] = []
-    for raw in raw_values:
-        for piece in raw.split(","):
-            token = piece.strip()
-            if not token:
-                continue
-            try:
-                parsed.append(int(token))
-            except ValueError as e:
-                raise ValueError(f"Invalid sample id: {token!r}") from e
-    return parsed
-
-
-@arrangement_app.command("list")
-def arrangement_list(
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-):
-    """List saved arrangements."""
-    from .repos.arrangement_repo import ArrangementRepo
-
-    db = _get_db()
-    try:
-        repo = ArrangementRepo(db)
-        arrangements = repo.list_all()
-
-        if json_output:
-            print(json.dumps(arrangements, indent=2))
-        else:
-            if not arrangements:
-                typer.echo("No arrangements found.")
-            else:
-                typer.echo(f"Arrangements ({len(arrangements)}):\n")
-                for a in arrangements:
-                    typer.echo(
-                        f"  {a['name']}  "
-                        f"[profile={a['profile_name']}, samples={a['sample_count']}]"
-                    )
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(exit_codes.ERROR_GENERAL)
-    finally:
-        db.close()
-
-
-@arrangement_app.command("create")
-def arrangement_create(
-    name: str = typer.Argument(..., help="Arrangement name"),
-    profile: str = typer.Option(
-        ..., "--profile", help="Arrangement profile name"
-    ),
-    from_search: Optional[str] = typer.Option(
-        None, "--from-search", help="Name pattern to search samples"
-    ),
-    from_ids: Optional[list[str]] = typer.Option(
-        None, "--from-ids", help="Sample IDs (comma-separated or repeatable)"
-    ),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-):
-    """Create a new arrangement with an optional initial sample selection."""
-    from . import profiles as profiles_module
-    from .repos.arrangement_repo import ArrangementRepo
-    from .repos.sample_repo import SampleRepo
-    from .search import SearchEngine
-
-    db = _get_db()
-    try:
-        profiles_dir = _get_profiles_dir()
-        profile_obj = profiles_module.get_arrangement_profile(profile, profiles_dir)
-        if profile_obj is None:
-            typer.echo(f"Error: arrangement profile not found: {profile}", err=True)
-            raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
-
-        initial_ids: set[int] = set(_parse_sample_ids_args(from_ids))
-
-        if from_search:
-            engine = SearchEngine(db)
-            result = engine.search(name=from_search, page=1, page_size=10000)
-            initial_ids.update(int(item["id"]) for item in result.items)
-
-        sample_repo = SampleRepo(db)
-        missing = sorted(sid for sid in initial_ids if sample_repo.get_by_id(sid) is None)
-        if missing:
-            typer.echo(
-                f"Error: sample ids not found: {', '.join(str(v) for v in missing)}",
-                err=True,
-            )
-            raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
-
-        repo = ArrangementRepo(db)
-        created = repo.create(name=name, profile_name=profile_obj.name)
-        inserted = repo.add_samples(created["id"], sorted(initial_ids))
-
-        payload = {
-            "id": created["id"],
-            "name": created["name"],
-            "profile_name": created["profile_name"],
-            "samples_attached": inserted,
-            "samples_requested": len(initial_ids),
-        }
-
-        if json_output:
-            print(json.dumps(payload, indent=2))
-        else:
-            typer.echo(
-                f"Created arrangement '{created['name']}' "
-                f"[profile={created['profile_name']}, samples={inserted}]"
-            )
-
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
-    except typer.Exit:
-        raise
-    except sqlite3.IntegrityError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(exit_codes.ERROR_CONSTRAINT_VIOLATION)
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(exit_codes.ERROR_GENERAL)
-    finally:
-        db.close()
+register_arrangement_commands(
+    app=app,
+    arrangement_app=arrangement_app,
+    selection_app=selection_app,
+    get_db=_get_db,
+    get_profiles_dir=_get_profiles_dir,
+    format_table=_format_table,
+)
 
 
 # ============================= Tag commands (Phase 5) =======================

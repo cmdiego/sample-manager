@@ -13,9 +13,12 @@ from sample_manager.repos.arrangement_repo import ArrangementRepo
 from sample_manager.repos.library_root_repo import LibraryRootRepo
 from sample_manager.repos.sample_repo import SampleRepo
 from sample_manager.profiles import ARRANGEMENT_PROFILES_FILENAME
+from sample_manager.profiles import EXPORT_PROFILES_FILENAME
 from sample_manager.exit_codes import (
     ERROR_CONSTRAINT_VIOLATION,
     ERROR_INVALID_ARGS,
+    ERROR_PARTIAL_OPERATION,
+    ERROR_SAFETY_REFUSAL,
 )
 
 
@@ -65,6 +68,24 @@ def _seed_samples(db_path, tmp_path):
         s1 = sample_repo.upsert(root["id"], "kick.wav", "kick.wav")
         s2 = sample_repo.upsert(root["id"], "snare.wav", "snare.wav")
         return s1["id"], s2["id"]
+
+
+def _write_export_profile(profiles_dir):
+    _write_yaml(
+        profiles_dir / EXPORT_PROFILES_FILENAME,
+        [
+            {
+                "name": "default-export",
+                "max_depth": 5,
+                "max_filename_len": 128,
+                "illegal_chars": '<>:"/\\|?*',
+                "replace_char": "_",
+                "case_policy": "preserve",
+                "path_sep_policy": "posix",
+                "on_violation": "autofix",
+            }
+        ],
+    )
 
 
 class TestArrangementList:
@@ -314,3 +335,219 @@ class TestArrangementCreate:
             ],
         )
         assert second.exit_code == ERROR_CONSTRAINT_VIOLATION
+
+    def test_create_from_selection(self, cli_runner, setup_config, tmp_path):
+        db_path, profiles_dir = setup_config
+        _write_yaml(
+            profiles_dir / ARRANGEMENT_PROFILES_FILENAME,
+            [
+                {
+                    "name": "default-monolithic",
+                    "layout_mode": "monolithic",
+                    "naming_template": "{name}",
+                    "collision_policy": "suffix",
+                }
+            ],
+        )
+        s1, _ = _seed_samples(db_path, tmp_path)
+        cli_runner.invoke(app, ["selection", "add", "--ids", str(s1)])
+        result = cli_runner.invoke(
+            app,
+            [
+                "arrangement",
+                "create",
+                "From Selection",
+                "--profile",
+                "default-monolithic",
+                "--from-selection",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "samples=1" in result.output
+
+
+class TestArrangementShowAddRemovePreview:
+    def _setup(self, setup_config, tmp_path):
+        db_path, profiles_dir = setup_config
+        _write_yaml(
+            profiles_dir / ARRANGEMENT_PROFILES_FILENAME,
+            [
+                {
+                    "name": "default-monolithic",
+                    "layout_mode": "monolithic",
+                    "naming_template": "{name}",
+                    "collision_policy": "suffix",
+                }
+            ],
+        )
+        _write_export_profile(profiles_dir)
+        s1, s2 = _seed_samples(db_path, tmp_path)
+        return db_path, profiles_dir, s1, s2
+
+    def test_show(self, cli_runner, setup_config, tmp_path):
+        _, _, s1, _ = self._setup(setup_config, tmp_path)
+        cli_runner.invoke(
+            app,
+            [
+                "arrangement",
+                "create",
+                "Show Me",
+                "--profile",
+                "default-monolithic",
+                "--from-ids",
+                str(s1),
+            ],
+        )
+        result = cli_runner.invoke(app, ["arrangement", "show", "Show Me", "--json"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["name"] == "Show Me"
+        assert payload["sample_count"] == 1
+
+    def test_add_and_remove(self, cli_runner, setup_config, tmp_path):
+        _, _, s1, s2 = self._setup(setup_config, tmp_path)
+        cli_runner.invoke(
+            app,
+            ["arrangement", "create", "Edit Me", "--profile", "default-monolithic"],
+        )
+        add_res = cli_runner.invoke(
+            app,
+            ["arrangement", "add", "Edit Me", "--ids", f"{s1},{s2}", "--json"],
+        )
+        assert add_res.exit_code == 0
+        add_payload = json.loads(add_res.output)
+        assert add_payload["added"] == 2
+
+        rm_res = cli_runner.invoke(
+            app,
+            ["arrangement", "remove", "Edit Me", "--ids", str(s1), "--json"],
+        )
+        assert rm_res.exit_code == 0
+        rm_payload = json.loads(rm_res.output)
+        assert rm_payload["removed"] == 1
+        assert rm_payload["sample_count"] == 1
+
+    def test_preview_deterministic_json(self, cli_runner, setup_config, tmp_path):
+        _, _, s1, s2 = self._setup(setup_config, tmp_path)
+        cli_runner.invoke(
+            app,
+            [
+                "arrangement",
+                "create",
+                "Preview Me",
+                "--profile",
+                "default-monolithic",
+                "--from-ids",
+                f"{s2},{s1}",
+            ],
+        )
+        args = [
+            "arrangement",
+            "preview",
+            "Preview Me",
+            "--export-profile",
+            "default-export",
+            "--format",
+            "json",
+        ]
+        one = cli_runner.invoke(app, args)
+        two = cli_runner.invoke(app, args)
+        assert one.exit_code == 0
+        assert two.exit_code == 0
+        assert one.output == two.output
+
+
+class TestExportAndRevert:
+    def _setup(self, setup_config, tmp_path, cli_runner):
+        db_path, profiles_dir = setup_config
+        _write_yaml(
+            profiles_dir / ARRANGEMENT_PROFILES_FILENAME,
+            [
+                {
+                    "name": "default-monolithic",
+                    "layout_mode": "monolithic",
+                    "naming_template": "{name}",
+                    "collision_policy": "suffix",
+                }
+            ],
+        )
+        _write_export_profile(profiles_dir)
+        s1, _ = _seed_samples(db_path, tmp_path)
+        cli_runner.invoke(
+            app,
+            [
+                "arrangement",
+                "create",
+                "Export Me",
+                "--profile",
+                "default-monolithic",
+                "--from-ids",
+                str(s1),
+            ],
+        )
+
+    def test_export_requires_confirm(self, cli_runner, setup_config, tmp_path):
+        self._setup(setup_config, tmp_path, cli_runner)
+        out_dir = tmp_path / "exports"
+        result = cli_runner.invoke(
+            app,
+            ["export", "Export Me", "--to", str(out_dir)],
+        )
+        assert result.exit_code == ERROR_SAFETY_REFUSAL
+
+    def test_export_dry_run_and_revert_dry_run(self, cli_runner, setup_config, tmp_path):
+        self._setup(setup_config, tmp_path, cli_runner)
+        out_dir = tmp_path / "exports"
+        export_res = cli_runner.invoke(
+            app,
+            [
+                "export",
+                "Export Me",
+                "--to",
+                str(out_dir),
+                "--dry-run",
+                "--json",
+            ],
+        )
+        assert export_res.exit_code == 0
+        export_payload = json.loads(export_res.output)
+        export_id = export_payload["export_id"]
+        assert export_payload["dry_run"] is True
+
+        revert_res = cli_runner.invoke(
+            app,
+            ["revert", "--export-id", str(export_id), "--dry-run", "--json"],
+        )
+        assert revert_res.exit_code == 0
+        rev_payload = json.loads(revert_res.output)
+        assert rev_payload["result"]["export_id"] == export_id
+
+    def test_export_and_revert_real(self, cli_runner, setup_config, tmp_path):
+        self._setup(setup_config, tmp_path, cli_runner)
+        out_dir = tmp_path / "exports2"
+        export_res = cli_runner.invoke(
+            app,
+            [
+                "export",
+                "Export Me",
+                "--to",
+                str(out_dir),
+                "--confirm",
+                "--json",
+            ],
+        )
+        assert export_res.exit_code in (0, ERROR_PARTIAL_OPERATION)
+        payload = json.loads(export_res.output)
+        export_id = payload["export_id"]
+
+        revert_res = cli_runner.invoke(
+            app,
+            [
+                "revert",
+                "--export-id",
+                str(export_id),
+                "--confirm",
+                "--json",
+            ],
+        )
+        assert revert_res.exit_code in (0, ERROR_PARTIAL_OPERATION)

@@ -60,3 +60,48 @@ class TestArrangementRepo:
 
         assert inserted_first == 1
         assert inserted_second == 0
+
+    def test_remove_samples(self, arrangement_repo, db, tmp_path):
+        lib = tmp_path / "lib2"
+        lib.mkdir()
+        db.execute(
+            "INSERT INTO library_root (path, path_norm) VALUES (?, ?)",
+            (str(lib), str(lib).lower()),
+        )
+        root_id = db.fetchval("SELECT id FROM library_root")
+        db.execute(
+            "INSERT INTO sample (library_root_id, rel_path, rel_path_norm, filename) "
+            "VALUES (?, ?, ?, ?)",
+            (root_id, "b.wav", "b.wav", "b.wav"),
+        )
+        sample_id = db.fetchval("SELECT id FROM sample")
+        db.conn.commit()
+
+        arr = arrangement_repo.create("Detach Test", "p1")
+        arrangement_repo.add_samples(arr["id"], [sample_id])
+        removed = arrangement_repo.remove_samples(arr["id"], [sample_id])
+        assert removed == 1
+        assert arrangement_repo.list_sample_ids(arr["id"]) == []
+
+    def test_list_samples(self, arrangement_repo, db, tmp_path):
+        lib = tmp_path / "lib3"
+        lib.mkdir()
+        db.execute(
+            "INSERT INTO library_root (path, path_norm) VALUES (?, ?)",
+            (str(lib), str(lib).lower()),
+        )
+        root_id = db.fetchval("SELECT id FROM library_root")
+        db.execute(
+            "INSERT INTO sample (library_root_id, rel_path, rel_path_norm, filename, ext) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (root_id, "c.wav", "c.wav", "c.wav", ".wav"),
+        )
+        sample_id = db.fetchval("SELECT id FROM sample")
+        db.conn.commit()
+
+        arr = arrangement_repo.create("List Test", "p1")
+        arrangement_repo.add_samples(arr["id"], [sample_id])
+        rows = arrangement_repo.list_samples(arr["id"])
+        assert len(rows) == 1
+        assert rows[0]["id"] == sample_id
+        assert "library_root_path" in rows[0]

@@ -36,6 +36,8 @@ def apply_migrations(db: Db) -> int:
     migrations = [
         _migration_0001,
         _migration_0002,
+        _migration_0003,
+        _migration_0004,
     ]
 
     for target_version, migrate_fn in enumerate(migrations, start=1):
@@ -231,6 +233,86 @@ def _migration_0002(db: Db) -> None:
             db.execute(statement)
 
         db.execute("UPDATE schema_version SET version = 2")
+
+
+# ---------------------------------------------------------------------------
+# Migration 0003 — Selection buffer table
+# ---------------------------------------------------------------------------
+
+_MIGRATION_0003_SQL = """\
+CREATE TABLE IF NOT EXISTS selection_sample (
+  sample_id      INTEGER PRIMARY KEY,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+
+  CONSTRAINT fk_selection_sample_sample
+    FOREIGN KEY (sample_id) REFERENCES sample(id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_selection_sample_created_at
+ON selection_sample(created_at);
+"""
+
+
+def _migration_0003(db: Db) -> None:
+    """Apply Migration 0003: create persistent selection buffer table."""
+    with db.transaction():
+        for statement in _split_sql_statements(_MIGRATION_0003_SQL):
+            db.execute(statement)
+
+        db.execute("UPDATE schema_version SET version = 3")
+
+
+# ---------------------------------------------------------------------------
+# Migration 0004 — Export run + history tables
+# ---------------------------------------------------------------------------
+
+_MIGRATION_0004_SQL = """\
+CREATE TABLE IF NOT EXISTS export_run (
+  id                   INTEGER PRIMARY KEY,
+  arrangement_id       INTEGER NOT NULL,
+  export_profile_name  TEXT NOT NULL,
+  export_dir           TEXT NOT NULL,
+  mode                 TEXT NOT NULL,
+  status               TEXT NOT NULL,
+  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+
+  CONSTRAINT fk_export_run_arrangement
+    FOREIGN KEY (arrangement_id) REFERENCES arrangement(id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_export_run_arrangement_id
+ON export_run(arrangement_id);
+CREATE INDEX IF NOT EXISTS idx_export_run_status
+ON export_run(status);
+
+CREATE TABLE IF NOT EXISTS history_entry (
+  id          INTEGER PRIMARY KEY,
+  export_id   INTEGER NOT NULL,
+  plan_json   TEXT NOT NULL,
+  stats_json  TEXT NOT NULL,
+  errors_json TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+
+  CONSTRAINT fk_history_entry_export
+    FOREIGN KEY (export_id) REFERENCES export_run(id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_history_entry_export_id
+ON history_entry(export_id);
+"""
+
+
+def _migration_0004(db: Db) -> None:
+    """Apply Migration 0004: create export and history tables."""
+    with db.transaction():
+        for statement in _split_sql_statements(_MIGRATION_0004_SQL):
+            db.execute(statement)
+
+        db.execute("UPDATE schema_version SET version = 4")
 
 
 def _split_sql_statements(sql: str) -> list[str]:

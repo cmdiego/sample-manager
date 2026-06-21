@@ -12,6 +12,7 @@
 
 ## Next
 - Phase 7: Arrangements (saved selection)
+- Phase 8: File traversal / navigation UX
 
 ## Phase 2 Deliverables
 
@@ -166,3 +167,4 @@
 - 2026-02-13 — Phase 5 implemented: tag service, tag/alias/parent CLI, bulk ops, 65 tests, 318 total passing
 - 2026-02-13 18:23 — generated prompt 'prompt_6' (header=10-chat-starter.md, prompt=prompt_6.md)
 - 2026-02-13 — Phase 6 implemented: profiles loader, profile/export-profile CLI, 80 tests, 398 total passing
+- 2026-06-21 — Added file traversal plan doc for Vim-style navigation (`h/j/k/l` plus arrow-key parity)

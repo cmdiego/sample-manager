@@ -1,6 +1,7 @@
 # Backlog / Future Work (Not in seed prompt)
 
 - TUI (Textual) for browsing and selection buffer
+- Vim-style file traversal/navigation with `h/j/k/l` and arrow-key parity
 - Audio analysis:
   - key/BPM detection, transient classification
   - loudness/peak stats
