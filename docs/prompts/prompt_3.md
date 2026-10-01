@@ -1,5 +1,5 @@
 # docs/prompts/prompt_3.md
-Task (Phase 3): Scanner + `sample scan` + `sample status` (DB-aligned).
+Task (Phase 3): Scanner + `sampleman scan` + `sampleman status` (DB-aligned).
 
 Read these docs first:
 - docs/03-cli.md (scan/status behavior)
@@ -9,8 +9,8 @@ Read these docs first:
 Scope (ONLY):
 - Implement scanning a library root directory and persisting results to SQLite via Phase 2 repos.
 - Implement CLI:
-  - `sample scan <path> [--rescan] [--fast]`
-  - `sample status`
+  - `sampleman scan <path> [--rescan] [--fast]`
+  - `sampleman status`
 - Do NOT implement browse/search UI beyond minimal counts (Phase 4).
 
 Scanner requirements (DB-aligned):

@@ -19,10 +19,10 @@ Repository constraints / expectations:
 - When config exists, program MUST validate configured paths (docs/02 §2.4)
 
 Required CLI commands (from docs/03):
-1) sample init
+1) sampleman init
    - Creates ~/.sample_manager/ and config.yaml if missing (idempotent)
    - Must not overwrite existing config
-2) sample config validate [--strict] [--json]
+2) sampleman config validate [--strict] [--json]
    - Validates paths:
      - db_path parent directory exists (may create parent dir if safe)
      - each library_roots entry exists and is a directory
@@ -31,13 +31,13 @@ Required CLI commands (from docs/03):
    - Default behavior: warn and continue; does not fail
    - --strict: fail if any validation errors exist
    - Exit code for strict validation failure must be 6 (per docs/03)
-3) sample config show [--json]
+3) sampleman config show [--json]
    - Prints the effective normalized config (expanded ~, env vars, absolute paths)
 4) (If present in docs/03 already) also implement:
-   - sample config set <key> <value>
-   - sample config add-root <path> [--set-default]
-   - sample config remove-root <path>
-   - sample config set-default <path>
+   - sampleman config set <key> <value>
+   - sampleman config add-root <path> [--set-default]
+   - sampleman config remove-root <path>
+   - sampleman config set-default <path>
    If these are not in docs/03, skip them.
 
 Config template (from docs/02) must be used when creating config:
@@ -61,7 +61,7 @@ Implementation guidance (keep minimal):
 
 Testing (required):
 - Add pytest tests under tests/:
-  - Missing config → sample init creates config file with expected keys
+  - Missing config → sampleman init creates config file with expected keys
   - Config validate:
     - with invalid library_root emits warnings/errors as expected
     - strict mode returns exit code 6
@@ -71,7 +71,7 @@ Use tmp dirs and monkeypatch HOME so tests do not touch the real ~/.sample_manag
 Deliverables:
 - All code in src/sample_manager/
 - Tests in tests/
-- Ensure `pip install -e ".[dev]"` works and `sample --help` runs (configure pyproject.toml if needed).
+- Ensure `pip install -e ".[dev]"` works and `sampleman --help` runs (configure pyproject.toml if needed).
 - Keep changes tight to Phase 1 scope.
 
 Output format:

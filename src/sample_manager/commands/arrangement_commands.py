@@ -150,6 +150,7 @@ def register(
             repo = ArrangementRepo(db)
             created = repo.create(name=name, profile_name=profile_obj.name)
             inserted = repo.add_samples(created["id"], sorted(initial_ids))
+            db.conn.commit()
             payload = {
                 "id": created["id"],
                 "name": created["name"],
@@ -256,6 +257,7 @@ def register(
                 require_source=True,
             )
             inserted = repo.add_samples(arrangement["id"], sorted(sample_ids))
+            db.conn.commit()
             total = len(repo.list_sample_ids(arrangement["id"]))
             payload = {"added": inserted, "requested": len(sample_ids), "sample_count": total}
             if json_output:

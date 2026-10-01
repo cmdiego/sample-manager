@@ -1,0 +1,63 @@
+{
+  "name": "movement-arrow-keys",
+  "steps": [
+    {
+      "command": "navigate",
+      "path": "drums"
+    },
+    {
+      "assert": "focus",
+      "row": 0,
+      "name": "kick.wav",
+      "is_dir": false
+    },
+    {
+      "event": "key",
+      "key": "Down"
+    },
+    {
+      "assert": "focus",
+      "row": 1,
+      "name": "snare.wav",
+      "is_dir": false
+    },
+    {
+      "event": "key",
+      "key": "Up"
+    },
+    {
+      "assert": "focus",
+      "row": 0,
+      "name": "kick.wav",
+      "is_dir": false
+    },
+    {
+      "event": "key",
+      "key": "Left"
+    },
+    {
+      "assert": "path",
+      "relative": "."
+    },
+    {
+      "assert": "focus",
+      "row": 0,
+      "name": "drums",
+      "is_dir": true
+    },
+    {
+      "event": "key",
+      "key": "Right"
+    },
+    {
+      "assert": "path",
+      "relative": "drums"
+    },
+    {
+      "assert": "focus",
+      "row": 0,
+      "name": "kick.wav",
+      "is_dir": false
+    }
+  ]
+}

@@ -38,6 +38,7 @@ def apply_migrations(db: Db) -> int:
         _migration_0002,
         _migration_0003,
         _migration_0004,
+        _migration_0005,
     ]
 
     for target_version, migrate_fn in enumerate(migrations, start=1):
@@ -313,6 +314,60 @@ def _migration_0004(db: Db) -> None:
             db.execute(statement)
 
         db.execute("UPDATE schema_version SET version = 4")
+
+
+# ---------------------------------------------------------------------------
+# Migration 0005 — Virtual arrangement folders and sample placement
+# ---------------------------------------------------------------------------
+
+_MIGRATION_0005_SQL = """\
+CREATE TABLE IF NOT EXISTS arrangement_folder (
+  id              INTEGER PRIMARY KEY,
+  arrangement_id  INTEGER NOT NULL,
+  parent_id       INTEGER NULL,
+  name            TEXT NOT NULL,
+  name_norm       TEXT NOT NULL,
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+
+  CONSTRAINT fk_arrangement_folder_arrangement
+    FOREIGN KEY (arrangement_id) REFERENCES arrangement(id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_arrangement_folder_parent
+    FOREIGN KEY (parent_id) REFERENCES arrangement_folder(id)
+    ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_arrangement_folder_root_sibling
+ON arrangement_folder(arrangement_id, name_norm)
+WHERE parent_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_arrangement_folder_nested_sibling
+ON arrangement_folder(arrangement_id, parent_id, name_norm)
+WHERE parent_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_arrangement_folder_tree_loading
+ON arrangement_folder(arrangement_id, parent_id, sort_order, name_norm);
+
+ALTER TABLE arrangement_sample ADD COLUMN folder_id INTEGER NULL
+  REFERENCES arrangement_folder(id) ON DELETE SET NULL;
+
+ALTER TABLE arrangement_sample ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_arrangement_sample_folder_id
+ON arrangement_sample(folder_id);
+"""
+
+
+def _migration_0005(db: Db) -> None:
+    """Apply Migration 0005: add virtual folders and sample placement to arrangements."""
+    with db.transaction():
+        for statement in _split_sql_statements(_MIGRATION_0005_SQL):
+            db.execute(statement)
+
+        db.execute("UPDATE schema_version SET version = 5")
 
 
 def _split_sql_statements(sql: str) -> list[str]:

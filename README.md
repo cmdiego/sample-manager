@@ -6,19 +6,32 @@ Sample Manager is a Python CLI for indexing a sample library, searching and tagg
 
 - Python 3.10+
 - `typer` and `pyyaml` at runtime
+- `PySide6` at runtime for the desktop GUI (installed automatically)
+- NumPy, soundfile, and sounddevice for WAV analysis and playback (installed automatically)
 
 ## Install
 
 From the project root:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
 For development:
 
 ```bash
+source .venv/bin/activate
 pip install -e .[dev]
+```
+
+After activating the virtualenv, the `sampleman` command is available on your
+shell path. If you open a new terminal, activate the environment again:
+
+```bash
+cd /path/to/sample_manager
+source .venv/bin/activate
 ```
 
 ## First Run
@@ -26,10 +39,71 @@ pip install -e .[dev]
 Initialize the user config and example profiles:
 
 ```bash
-sample init
+sampleman init
 ```
 
 This creates `~/.sample_manager/config.yaml` and `~/.sample_manager/profiles/` if they do not already exist.
+
+## Launching the app
+
+Running `sampleman` with no subcommand launches the **Qt desktop GUI** (this is
+also what `python -m sample_manager` does):
+
+```bash
+source .venv/bin/activate
+sampleman        # launches the Qt GUI
+sampleman gui    # explicit — same as above
+```
+
+For agent-driven or scripted GUI testing, launch the JSON simulation shell:
+
+```bash
+sampleman --simulation
+sampleman gui --simulation
+python -m sample_manager --simulation
+```
+
+To run the simulation shell without using your real config, database, or library,
+use the disposable sample environment:
+
+```bash
+sampleman --simulation-temp
+sampleman gui --simulation-temp
+python -m sample_manager --simulation-temp
+```
+
+This creates a temporary SQLite database and a small temporary sample library for
+the session, then deletes them when the shell exits.
+
+The shell reads one JSON object per line from stdin and writes one JSON response
+per line to stdout. Example:
+
+```json
+{"event": "key", "key": "L"}
+{"command": "snapshot"}
+{"assert": "path", "relative": "drums"}
+```
+
+If you prefer the terminal, the legacy Textual TUI is still available:
+
+```bash
+sampleman tui    # launches the legacy Textual terminal UI
+```
+
+All the non-interactive subcommands documented below continue to work
+regardless of which frontend you use.
+
+Audio is routed to the operating system's default output device. Choose
+**Application → Settings → I/O** to select **System Default Output**, any
+available output-capable system audio device, or **None**; changes apply
+immediately.
+
+Playback shortcuts: **Space** pauses active playback or starts the focused sample
+from the beginning; **Ctrl+Space** resumes a paused sample from its saved position.
+
+> **Screenshots:** GUI screenshots are pending — they can't be captured in the
+> current headless CI environment and will be added once a display-backed
+> capture is available.
 
 ## Concepts
 
@@ -54,8 +128,9 @@ An alias is an alternate name for a tag. Aliases are globally unique, case-insen
 ### Tag Parent
 Tag parents define inheritance between tags. The relationship is `child -> parent`, and the graph must remain acyclic. Searching for a tag includes its descendants.
 
-### Selection
-Selection is a persistent working buffer of sample IDs. It is useful when you want to collect samples once and reuse that set for arrangement editing or other operations.
+### Selection (Stage in the GUI)
+Selection is a persistent working buffer of sample IDs. The GUI calls this **Stage**, following the
+Git-style workflow: collect samples in Stage before adding or committing them to an Arrangement.
 
 ### Arrangement
 An arrangement is a named saved selection of samples plus a chosen arrangement profile. It is the main unit you use when preparing an export.
@@ -77,97 +152,97 @@ Every export attempt is recorded in SQLite. History stores the plan and executio
 Show the effective config:
 
 ```bash
-sample config show
-sample config show --json
+sampleman config show
+sampleman config show --json
 ```
 
 Validate config paths:
 
 ```bash
-sample config validate
-sample config validate --strict
+sampleman config validate
+sampleman config validate --strict
 ```
 
 Add or edit config values:
 
 ```bash
-sample config set db_path ~/.sample_manager/sample_manager.sqlite3
-sample config add-root /path/to/samples
-sample config set-default /path/to/samples
+sampleman config set db_path ~/.sample_manager/sample_manager.sqlite3
+sampleman config add-root /path/to/samples
+sampleman config set-default /path/to/samples
 ```
 
 Scan a library root:
 
 ```bash
-sample scan /path/to/samples
-sample scan /path/to/samples --rescan
-sample scan /path/to/samples --fast
+sampleman scan /path/to/samples
+sampleman scan /path/to/samples --rescan
+sampleman scan /path/to/samples --fast
 ```
 
 Check indexed library status:
 
 ```bash
-sample status
+sampleman status
 ```
 
 Browse and search samples:
 
 ```bash
-sample browse
-sample browse --json
-sample search drum
-sample search --path packs/kicks --tag kick
-sample search --sort mtime --page 2 --page-size 50
+sampleman browse
+sampleman browse --json
+sampleman search drum
+sampleman search --path packs/kicks --tag kick
+sampleman search --sort mtime --page 2 --page-size 50
 ```
 
 Manage tags:
 
 ```bash
-sample tag add 12 kick
-sample tag remove 12 kick
-sample tag list 12
-sample tag bulk --from-search drum --add percussion
-sample tag alias add kick k
-sample tag parent add kick drum
+sampleman tag add 12 kick
+sampleman tag remove 12 kick
+sampleman tag list 12
+sampleman tag bulk --from-search drum --add percussion
+sampleman tag alias add kick k
+sampleman tag parent add kick drum
 ```
 
 Work with profiles:
 
 ```bash
-sample profile list
-sample profile show default-monolithic
-sample export-profile list
-sample export-profile show mpc-live
+sampleman profile list
+sampleman profile show default-monolithic
+sampleman export-profile list
+sampleman export-profile show mpc-live
 ```
 
 Create and manage arrangements:
 
 ```bash
-sample arrangement list
-sample arrangement create my-kit --profile default-monolithic --from-search kick
-sample arrangement show my-kit
-sample arrangement add my-kit --from-selection
-sample arrangement remove my-kit --ids 12,15
-sample arrangement preview my-kit --export-profile mpc-live
+sampleman arrangement list
+sampleman arrangement create my-kit --profile default-monolithic --from-search kick
+sampleman arrangement show my-kit
+sampleman arrangement add my-kit --from-selection
+sampleman arrangement remove my-kit --ids 12,15
+sampleman arrangement preview my-kit --export-profile mpc-live
 ```
 
 Selection buffer:
 
 ```bash
-sample selection add --ids 12,15
-sample selection add --from-search kick
-sample selection list
-sample selection remove --ids 12
-sample selection clear
+sampleman selection add --ids 12,15
+sampleman selection add --from-search kick
+sampleman selection list
+sampleman selection remove --ids 12
+sampleman selection clear
 ```
 
 Export and revert:
 
 ```bash
-sample export my-kit --to /tmp/export --export-profile mpc-live --confirm
-sample export my-kit --to /tmp/export --export-profile mpc-live --dry-run
-sample revert --export-id 1 --confirm
-sample revert --export-id 1 --dry-run
+sampleman export my-kit --to /tmp/export --export-profile mpc-live --confirm
+sampleman export my-kit --to /tmp/export --export-profile mpc-live --dry-run
+sampleman revert --export-id 1 --confirm
+sampleman revert --export-id 1 --dry-run
 ```
 
 ## Files
@@ -183,7 +258,7 @@ sample revert --export-id 1 --dry-run
 
 ## Notes
 
-- `sample export` and `sample revert` require `--confirm` unless you use `--dry-run`.
+- `sampleman export` and `sampleman revert` require `--confirm` unless you use `--dry-run`.
 - Tags are resolved case-insensitively by name, shorthand, or alias.
 - Tag search expands through descendants in the inheritance graph.
 
@@ -193,36 +268,36 @@ This example shows a complete workflow from a fresh setup to export and revert.
 
 ```bash
 # 1. Initialize local config and profiles
-sample init
+sampleman init
 
 # 2. Point Sample Manager at a library root
-sample config add-root /path/to/sample-library
-sample config set-default /path/to/sample-library
+sampleman config add-root /path/to/sample-library
+sampleman config set-default /path/to/sample-library
 
 # 3. Scan the library into SQLite
-sample scan /path/to/sample-library
+sampleman scan /path/to/sample-library
 
 # 4. Search for samples and inspect the results
-sample search kick --json
+sampleman search kick --json
 
 # 5. Add matching samples to the selection buffer
-sample selection add --from-search kick
-sample selection list
+sampleman selection add --from-search kick
+sampleman selection list
 
 # 6. Add tags to selected samples if needed
-sample tag add 12 kick
-sample tag bulk --from-search kick --add drum
+sampleman tag add 12 kick
+sampleman tag bulk --from-search kick --add drum
 
 # 7. Create an arrangement from the selection buffer
-sample arrangement create my-kit --profile default-monolithic --from-selection
+sampleman arrangement create my-kit --profile default-monolithic --from-selection
 
 # 8. Review the arrangement
-sample arrangement show my-kit
-sample arrangement preview my-kit --export-profile mpc-live
+sampleman arrangement show my-kit
+sampleman arrangement preview my-kit --export-profile mpc-live
 
 # 9. Export the arrangement to a target directory
-sample export my-kit --to /tmp/sample-export --export-profile mpc-live --confirm
+sampleman export my-kit --to /tmp/sample-export --export-profile mpc-live --confirm
 
 # 10. Revert the export if needed
-sample revert --export-id 1 --confirm
+sampleman revert --export-id 1 --confirm
 ```

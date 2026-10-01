@@ -15,8 +15,8 @@ Scope (ONLY):
   - filtering by a tag expands to include all descendant tags (parent matches descendants only)
   - use TagGraphService.expand_for_search(tag_ids)
 - Implement CLI:
-  - `sample search ... [--json]`
-  - `sample browse ...` with pagination
+  - `sampleman search ... [--json]`
+  - `sampleman browse ...` with pagination
 - Do NOT implement tagging mutations (Phase 5), arrangements, export, revert.
 
 Output contract:
