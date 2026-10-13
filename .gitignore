@@ -13,3 +13,7 @@ build/
 
 # OS
 .DS_Store
+
+# Third-party sample packs (local test data; not redistributable)
+test_lib/
+Mars_808/
