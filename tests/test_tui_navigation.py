@@ -166,6 +166,28 @@ def test_search_leaves_waveform_navigation(tmp_path):
     asyncio.run(_exercise_search_after_waveform_nav((first, second)))
 
 
+def test_action_pane_q_closes_only_the_modal(tmp_path):
+    """The documented dismiss key must not continue into the app's quit key."""
+    async def exercise():
+        app = _NavigationTestApp((first, second))
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("right")
+            assert isinstance(app.screen, ActionPane)
+            await pilot.press("q")
+            await pilot.pause()
+            assert app.is_running
+            assert not isinstance(app.screen, ActionPane)
+            assert app.fake_data.selected == {1, 2}
+
+    first, second = tmp_path / "one", tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+    (first / "kick.wav").write_bytes(b"RIFF0000")
+    (first / "snare.wav").write_bytes(b"RIFF1111")
+    asyncio.run(exercise())
+
+
 def test_known_root_resolves_duplicate_names_without_suffix_scan(tmp_path, monkeypatch):
     """The direct path key chooses the correct sample among duplicate names."""
     root = tmp_path / "samples"

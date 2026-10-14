@@ -95,10 +95,10 @@ per line to stdout. Example:
 {"assert": "path", "relative": "drums"}
 ```
 
-If you prefer the terminal, the legacy Textual TUI is still available:
+For the keyboard-driven terminal interface:
 
 ```bash
-sampleman tui    # launches the legacy Textual terminal UI
+sampleman tui
 ```
 
 In the TUI, press **Tab** to switch between Browser and the selected-files
@@ -108,10 +108,24 @@ roots. The TUI opens the configured default root at startup, and Stage remains
 available when switching roots. Use the GUI's **Rescan** control or
 `sampleman scan` to pick up filesystem changes.
 
+Press **F2** for **Settings**, or find Settings in the **Ctrl+P** command
+palette. Choose an audio output device or disable playback, and turn automatic
+audition on or off. **Save** applies the choices immediately and stores them in
+the `tui` section of `config.yaml`; **Cancel** or **Escape** discards edits.
+Settings also shows the active library and configuration/database locations.
+
+Press **/** to search indexed samples across the active library, including
+nested packs. Search matches filename, relative path, and tags; the activation
+slash is not part of the query. Type or paste a query, use **Up/Down** to audition
+results, and **Return** to toggle a sample in Stage. **Escape** or **Left** clears
+search and restores the directory cursor. Deleting the query keeps search open.
+**Space** controls playback; **Shift+Space** inserts a space in the query.
+Relative folders distinguish results that share a filename.
+
 All the non-interactive subcommands documented below continue to work
 regardless of which frontend you use.
 
-Audio is routed to the operating system's default output device. Choose
+In the GUI, audio is routed to the operating system's default output device. Choose
 **Application → Settings → I/O** to select **System Default Output**, any
 available output-capable system audio device, or **None**; changes apply
 immediately.

@@ -30,6 +30,7 @@ KEYMAP: dict[str, str] = {
     # character itself.  "?" → "question_mark", "/" → "slash".
     "q": "quit",
     "question_mark": "show_help",
+    "f2": "show_settings",
     # Filter / search
     "slash": "activate_filter",
     "escape": "cancel_or_back",
@@ -50,7 +51,7 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "select_or_descend": "Select file / descend into directory",
     "add_to_selection": "Add focused item to selection",
     "remove_from_selection": "Remove focused item from selection",
-    "toggle_playback": "Pause / play focused sample from start",
+    "toggle_playback": "Pause / resume or play focused sample",
     "resume_playback": "Resume paused sample from checkpoint",
     "waveform_nav_enter": "Enter waveform navigation",
     "waveform_seek_fine_left": "Seek left (fine)",
@@ -61,7 +62,8 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "waveform_nav_exit": "Exit waveform navigation",
     "quit": "Quit",
     "show_help": "Show this help overlay",
-    "activate_filter": "Activate typeahead filter",
+    "activate_filter": "Search library by name, path, or tag",
+    "show_settings": "Audio output and auto-audition settings",
     "cancel_or_back": "Cancel filter / go back",
     "cycle_pane_focus": "Switch Browser / Stage",
     "next_library_root": "Switch to next library root",
@@ -84,7 +86,7 @@ ACTION_CATEGORIES: dict[str, list[str]] = {
         "waveform_nav_exit",
     ],
     "Filter": ["activate_filter", "cancel_or_back"],
-    "App": ["quit", "show_help", "cycle_pane_focus", "next_library_root", "command_palette"],
+    "App": ["quit", "show_help", "show_settings", "cycle_pane_focus", "next_library_root", "command_palette"],
 }
 
 

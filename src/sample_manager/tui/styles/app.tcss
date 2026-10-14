@@ -143,7 +143,9 @@ HelpScreen {
 
 HelpScreen .help-container {
     width: 64;
+    max-width: 95%;
     height: auto;
+    max-height: 90%;
     border: double $accent;
     padding: 1 2;
     background: $surface;

@@ -12,7 +12,7 @@ CSS for this widget lives in styles/app.tcss (no inline DEFAULT_CSS).
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
@@ -40,7 +40,7 @@ class HelpScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         inverted = _build_inverted_keymap()
-        with Vertical(classes="help-container"):
+        with VerticalScroll(classes="help-container"):
             yield Static("  Sample Manager", classes="help-title")
             yield Static("", classes="help-spacer")
 
@@ -70,7 +70,7 @@ class HelpScreen(ModalScreen):
                 classes="help-row",
             )
             yield Static(
-                "    Use a / d to add or remove from selection. Press / to filter by name.",
+                "    Use a / d to add or remove. Press / to search the whole library.",
                 classes="help-row",
             )
             yield Static(
@@ -83,6 +83,14 @@ class HelpScreen(ModalScreen):
             )
             yield Static(
                 "    Press r to cycle indexed library roots.",
+                classes="help-row",
+            )
+            yield Static(
+                "    F2 opens Settings. Search matches names, paths, and tags.",
+                classes="help-row",
+            )
+            yield Static(
+                "    Paste a query, or Shift+Space for spaces; Esc clears search.",
                 classes="help-row",
             )
             yield Static("", classes="help-spacer")

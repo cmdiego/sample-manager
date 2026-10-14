@@ -64,12 +64,18 @@ class ActionPane(ModalScreen):
             yield Static("ESC to close", classes="action-hint")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Return an action to the app without rebroadcasting the button event."""
+        event.stop()
         self.dismiss(event.button.id)
 
     def on_key(self, event) -> None:
+        """Consume modal shortcuts before dismissal exposes the base screen."""
         if event.key == "escape" or event.key == "q":
+            event.stop()
             self.dismiss(None)
         elif event.key == "a" and self._item.sample_id is not None and not self._is_selected:
+            event.stop()
             self.dismiss("add")
         elif event.key == "d" and self._item.sample_id is not None and self._is_selected:
+            event.stop()
             self.dismiss("remove")

@@ -92,6 +92,7 @@ def test_space_toggles_playback_even_while_filtering():
     app._state = NavState.initial(Path("/samples"), [file_item])
     app._filter_active = True
     app._filter_query = "ki"
+    app._filter_results = (file_item,)
     app._audition_focused()
     event = MagicMock(key="space", character=" ")
 
