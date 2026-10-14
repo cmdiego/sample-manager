@@ -23,6 +23,18 @@ def test_gui_setup_creates_starters_and_preserves_existing_files(tmp_path, monke
     export_file = profiles_dir / profiles.EXPORT_PROFILES_FILENAME
     assert arrangement_file.exists() and export_file.exists()
 
+    # The shared CLI database opener must accept the freshly written config
+    # and create the schema the empty GUI expects.
+    from sample_manager.cli import _get_db
+
+    db = _get_db()
+    try:
+        assert db.fetchval(
+            "SELECT name FROM sqlite_master WHERE name = 'library_root'"
+        ) == "library_root"
+    finally:
+        db.close()
+
     # A later launch must not erase personal config or edited profiles.
     saved = config.load_config(config_path)
     saved["custom"] = "keep me"
