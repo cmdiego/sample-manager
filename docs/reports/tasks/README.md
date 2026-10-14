@@ -36,6 +36,7 @@ Reports created with the Codex `task` skill use this section order:
 | 014 — GUI Seek and Hermetic Lifecycle Fixture | ✅ Done | 2026-10-14 | [task.md](014-seek-and-e2e-fixture/task.md) | Waveform clicks seek; lifecycle tests use generated audio. |
 | 015 — TUI Search Mode Transition | ✅ Done | 2026-10-14 | [task.md](015-tui-search-mode-transition/task.md) | Search cancels waveform navigation without seeking. |
 | 016 — TUI Settings and Library Search | ✅ Done | 2026-10-14 | [task.md](016-tui-settings-search/task.md) | F2 settings, root-wide search, and modal keyboard fixes. |
+| 017 — TUI Library Rescan | In Progress | 2026-10-14 | [task.md](017-tui-library-rescan/task.md) | Refresh indexed files from F5 without blocking navigation. |
 
 ## Maintenance Rules
 
