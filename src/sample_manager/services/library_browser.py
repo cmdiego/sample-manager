@@ -44,6 +44,7 @@ class BrowserItem:
     is_dir: bool
     sample_id: int | None  # None = not indexed in the DB
     is_selected: bool
+    context: str | None = None  # Search-result folder, hidden in directory listings.
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,22 @@ class LibraryBrowserService:
                 is_selected=item.is_selected,
             )
             for item in build_items(path, indexed, selection)
+        )
+
+    def search_samples(self, root: LibraryRoot, query: str) -> tuple[BrowserItem, ...]:
+        """Return root-wide indexed search hits as selection-aware browser rows."""
+        rows = self._sample_repo.search_by_text(root.id, query)
+        selected = self.selection_ids()
+        return tuple(
+            BrowserItem(
+                name=row["filename"],
+                path=root.path / row["rel_path"],
+                is_dir=False,
+                sample_id=row["id"],
+                is_selected=row["id"] in selected,
+                context=str(Path(row["rel_path"]).parent),
+            )
+            for row in rows
         )
 
     def sample_details(self, sample_id: int) -> SampleDetails | None:
