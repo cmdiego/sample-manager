@@ -87,5 +87,8 @@ def _format_item(item: NavItem, focused: bool = False) -> str:
 
     check = "[green]✓[/green] " if item.is_selected else "  "
     indexed_tag = f" [dim]#{item.sample_id}[/dim]" if item.sample_id is not None else " [dim](not indexed)[/dim]"
-    text = f"{cursor} {check}{name}{indexed_tag}"
+    # Search may show identical filenames from several packs; include the
+    # relative parent while keeping the actual filename and path unchanged.
+    context = f" [dim]— {escape(item.context)}[/dim]" if item.context else ""
+    text = f"{cursor} {check}{name}{context}{indexed_tag}"
     return f"[bold reverse]{text}[/bold reverse]" if focused else text

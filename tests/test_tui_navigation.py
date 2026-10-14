@@ -7,9 +7,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from sample_manager.audio import PlaybackStatus
+from sample_manager.audio import PlaybackStatus, WaveformBin, WaveformData
 from sample_manager.services.navigation import NavItem, build_items
 from sample_manager.tui.app import SampleManagerApp
+from sample_manager.tui.widgets.action_pane import ActionPane
 from sample_manager.tui.widgets.file_tree import _format_item
 
 
@@ -26,6 +27,14 @@ class _FakeData:
 
     def get_selection_ids(self) -> set[int]:
         return set(self.selected)
+
+    def search_samples(self, root: Path, query: str) -> tuple[NavItem, ...]:
+        """Return indexed matches for the navigation pilot's small library."""
+        return tuple(
+            NavItem(path.name, path, False, sid, sid in self.selected)
+            for sid, path in self.paths.items()
+            if path.is_relative_to(root) and query.lower() in path.name.lower()
+        )
 
     def get_sample_details(self, sid: int) -> dict:
         return {"id": sid, "filename": self.paths[sid].name}
@@ -118,6 +127,65 @@ def test_tui_tab_stage_removal_and_root_cycle(tmp_path):
     (first / "kick.wav").write_bytes(b"RIFF0000")
     (first / "snare.wav").write_bytes(b"RIFF1111")
     asyncio.run(_exercise_panes_and_roots((first, second)))
+
+
+async def _exercise_search_after_waveform_nav(roots: tuple[Path, Path]) -> None:
+    """Use real key delivery to cross from waveform navigation into search."""
+    app = _NavigationTestApp(roots)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Supply a loaded waveform without running the decoder in this input
+        # routing test; `w` only becomes active when waveform data exists.
+        app._waveform_data = WaveformData(
+            roots[0] / "kick.wav", 9.0, (WaveformBin(-1.0, 1.0),)
+        )
+        await pilot.press("w")
+        assert app._waveform_nav_active
+
+        await pilot.press("/")
+        await pilot.press("k")
+        await pilot.pause()
+        assert app._filter_active and app._filter_query == "k"
+        assert not app._waveform_nav_active
+        app._audio_player.seek.assert_not_called()
+
+        # Right must act on the selected search hit, not move the old seek
+        # cursor; on a file it opens the existing action pane.
+        await pilot.press("right")
+        await pilot.pause()
+        assert isinstance(app.screen, ActionPane)
+
+
+def test_search_leaves_waveform_navigation(tmp_path):
+    """Starting a search makes waveform and browser arrow modes exclusive."""
+    first, second = tmp_path / "one", tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+    (first / "kick.wav").write_bytes(b"RIFF0000")
+    (first / "snare.wav").write_bytes(b"RIFF1111")
+    asyncio.run(_exercise_search_after_waveform_nav((first, second)))
+
+
+def test_action_pane_q_closes_only_the_modal(tmp_path):
+    """The documented dismiss key must not continue into the app's quit key."""
+    async def exercise():
+        app = _NavigationTestApp((first, second))
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("right")
+            assert isinstance(app.screen, ActionPane)
+            await pilot.press("q")
+            await pilot.pause()
+            assert app.is_running
+            assert not isinstance(app.screen, ActionPane)
+            assert app.fake_data.selected == {1, 2}
+
+    first, second = tmp_path / "one", tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+    (first / "kick.wav").write_bytes(b"RIFF0000")
+    (first / "snare.wav").write_bytes(b"RIFF1111")
+    asyncio.run(exercise())
 
 
 def test_known_root_resolves_duplicate_names_without_suffix_scan(tmp_path, monkeypatch):

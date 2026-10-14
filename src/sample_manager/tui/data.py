@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ..db import Db
 from ..services.library_browser import LibraryBrowserService
+from .nav_state import NavItem
 
 
 class TuiDataSource:
@@ -30,6 +31,22 @@ class TuiDataSource:
         the directory listing. Queried once per root and reused across directory changes.
         """
         return self._service.indexed_files(library_root_path)
+
+    def search_samples(self, root_path: Path, query: str) -> tuple[NavItem, ...]:
+        """Search indexed names, paths, and tags throughout one library root."""
+        root = next(
+            (root for root in self._service.library_roots() if root.path == root_path),
+            None,
+        )
+        if root is None:
+            return ()
+        return tuple(
+            NavItem(
+                item.name, item.path, False, item.sample_id, item.is_selected,
+                context=item.context if item.context != "." else "",
+            )
+            for item in self._service.search_samples(root, query)
+        )
 
     def get_selection_ids(self) -> set[int]:
         return self._service.selection_ids()

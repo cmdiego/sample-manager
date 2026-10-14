@@ -21,6 +21,7 @@ def test_filter_matches_middle_of_name_and_acts_on_highlighted_match():
     app._state = NavState.initial(Path("/lib"), items)
     app._filter_active = True
     app._filter_query = "drum"
+    app._filter_results = tuple(items[:2])
     app._refresh_ui = Mock()
     app._data = Mock()
     app._data.get_selection_ids.return_value = {2}

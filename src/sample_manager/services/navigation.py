@@ -21,6 +21,7 @@ class NavItem:
     is_dir: bool
     sample_id: int | None  # None = file not indexed in DB
     is_selected: bool
+    context: str = ""  # Relative parent shown for library-wide search results.
 
 
 @dataclass(frozen=True)
