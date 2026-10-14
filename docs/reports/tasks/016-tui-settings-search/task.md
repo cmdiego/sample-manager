@@ -1,6 +1,6 @@
 # Task 016 — TUI Settings and Library Search
 
-- **Status**: In Progress
+- **Status**: Done
 - **Created**: 2026-10-14
 - **Owner**: Codex
 - **Origin**: User request to focus on TUI settings, search, and sample-manager workflow gaps
@@ -26,11 +26,11 @@
 
 - [x] Verify current main and carry Task 015 into the main-based branch.
 - [x] Reproduce slash display and current-directory-only search.
-- [ ] Implement indexed root-wide search with clear query feedback.
-- [ ] Add editable, persistent settings with discoverable entry points.
-- [ ] Test modal isolation, device failures, search editing, and playback behavior.
-- [ ] Compare common sample-manager capabilities and record actionable gaps.
-- [ ] Run required checks, make incremental commits, and open a main-targeted PR.
+- [x] Implement indexed root-wide search with clear query feedback.
+- [x] Add editable, persistent settings with discoverable entry points.
+- [x] Test modal isolation, device failures, search editing, and playback behavior.
+- [x] Compare common sample-manager capabilities and record actionable gaps.
+- [x] Run required checks and make incremental commits; open a main-targeted PR.
 
 ## 4. [Implementation + Revert]
 
@@ -59,17 +59,33 @@
 
 ### Changed Files
 
-- Pending.
+- `tui/settings.py`, `tui/widgets/settings_screen.py` — framework-independent YAML preferences and a bounded, scrollable settings modal.
+- `tui/app.py`, `tui/keybindings.py` — settings entry points, output replacement, auto-audition, cached indexed search, paste/edit handling, and modal keyboard isolation.
+- `tui/data.py`, `services/navigation.py`, `tui/widgets/file_tree.py` — search adapter and relative-path context for duplicate names.
+- `tui/widgets/filters_panel.py` — exact query text and result count, without a slash prefix.
+- `tui/widgets/action_pane.py`, `tui/widgets/help_screen.py`, `tui/styles/app.tcss` — consume modal dismiss keys and make Help scrollable in small terminals.
+- TUI search/settings/navigation/widget/audio tests — real mounted workflows, device and persistence failures, and updated indexed-result fixtures.
+- `README.md` and task tracker — document the TUI controls.
 
 ### Behavior Implemented
 
 - Baseline pilot confirmed the stored query is `Drum`, while the display adds `/Drum`. Nested samples are absent because matching only uses current directory rows.
+- Search now queries the shared indexed root-wide service once per edit, matches names/paths/tags, shows parent folders, supports paste, retains empty typing mode, and preserves directory navigation on Escape. Typing does not auto-audition prefixes.
+- F2 and the command palette open Settings even without a configured library. Save applies output and auto-audition preferences and preserves other YAML keys; cancellation and failures keep current settings intact.
+- A mounted pilot reproduced `q` dismissing an action pane and then quitting the app; modal key consumption now prevents this. Help scrolls at 80×24.
 
 ### Validation
 
-- Pending implementation.
+- Search/navigation/widget checks: 59 passed after indexed search changes.
+- Settings plus search/navigation/help/widget checks: 68 passed before the final save-error test.
+- Palette smoke test: Ctrl+P → Settings opened the real modal.
+- Exported an 80×24 Textual settings screenshot and inspected its rendered PNG; Save/Cancel remain visible and the settings body scrolls.
+- Full suite initially found an older audio test manually seeding directory-only filter state; updated that fixture to seed indexed results.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/`: 891 passed, 10 existing deprecation warnings; includes JSON GUI scenarios and all TUI tests.
+- `git diff --check`: passed.
 
 ### Follow-ups / Risks
 
 - Capability audit references: [Sononym preferences](https://www.sononym.net/docs/manual/preferences/), [filtering](https://www.sononym.net/docs/manual/filtering/), [favorites](https://www.sononym.net/docs/manual/favorites/), and [XO interface overview](https://support.xlnaudio.com/hc/en-us/articles/16920363887645-Interface-Overview).
-- Candidate gaps to probe: library rescan/add, favorites and tagging, preview volume/looping, result sorting, reveal-source action, and metadata filters.
+- Confirmed gaps: TUI cannot add/rescan a library; tags can be searched but not edited in the TUI; no dedicated favorites, preview volume/loop controls, result sort controls, or metadata filters. Search currently returns at most 500 matches and reports that cap.
+- Next priority: background rescan in the TUI so newly added files can be found without leaving the terminal app. Favorites/tag editing and preview controls follow.

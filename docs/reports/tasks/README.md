@@ -35,7 +35,7 @@ Reports created with the Codex `task` skill use this section order:
 | 013 — GUI First-Run Setup | ✅ Done | 2026-10-13 | [task.md](013-gui-first-run/task.md) | Launch without prior CLI initialization. |
 | 014 — GUI Seek and Hermetic Lifecycle Fixture | ✅ Done | 2026-10-14 | [task.md](014-seek-and-e2e-fixture/task.md) | Waveform clicks seek; lifecycle tests use generated audio. |
 | 015 — TUI Search Mode Transition | ✅ Done | 2026-10-14 | [task.md](015-tui-search-mode-transition/task.md) | Search cancels waveform navigation without seeking. |
-| 016 — TUI Settings and Library Search | In Progress | 2026-10-14 | [task.md](016-tui-settings-search/task.md) | Editable playback preferences and indexed search across nested packs. |
+| 016 — TUI Settings and Library Search | ✅ Done | 2026-10-14 | [task.md](016-tui-settings-search/task.md) | F2 settings, root-wide search, and modal keyboard fixes. |
 
 ## Maintenance Rules
 

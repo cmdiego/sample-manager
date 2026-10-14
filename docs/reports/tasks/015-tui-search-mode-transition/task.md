@@ -72,4 +72,4 @@ Entering typeahead search clears the waveform seek cursor and ends its arrow-key
 
 ### Follow-ups / Risks
 
-- No known behavioral risk; this PR is based on the branch for Task 014 until that PR merges.
+- Task 015 was carried into the main-targeted Task 016 branch because PR #7 merged into the old base branch after PR #6 had already merged to main.
