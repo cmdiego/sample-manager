@@ -16,6 +16,7 @@ from sample_manager.config import load_config, normalize_config
 from sample_manager.tui.app import SampleManagerApp
 from sample_manager.tui.settings import TuiPreferences
 from sample_manager.tui.widgets.add_library_screen import AddLibraryScreen
+from sample_manager.tui.widgets.help_screen import HelpScreen
 
 
 class _OnboardingApp(SampleManagerApp):
@@ -145,5 +146,24 @@ def test_adding_another_folder_preserves_stage_and_rejects_failed_scan(onboardin
             assert str(failed) not in load_config(config_path)["library_roots"]
             assert "Scan failed" in app._scan_message
             assert app._data.get_selection_ids() == {sid}
+
+    asyncio.run(exercise())
+
+
+def test_help_and_quit_work_before_the_first_library_is_added(onboarding):
+    """First-run users can discover controls and quit without configuring storage."""
+    config_path, _root = onboarding
+
+    async def exercise():
+        app = _OnboardingApp(config_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._state is None
+            await pilot.press("?")
+            assert isinstance(app.screen, HelpScreen)
+            await pilot.press("escape", "q")
+            await pilot.pause()
+            assert not app.is_running
+            assert not config_path.exists()
 
     asyncio.run(exercise())

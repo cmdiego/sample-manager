@@ -650,6 +650,19 @@ class SampleManagerApp(App):
             else:
                 return
 
+        # First-run and unavailable-library screens still need application
+        # commands; only sample/navigation actions depend on a loaded state.
+        action = resolve_key(event.key)
+        if action in ("quit", "show_help", "command_palette"):
+            event.stop()
+            if action == "quit":
+                self.exit()
+            elif action == "show_help":
+                self.push_screen(HelpScreen())
+            else:
+                self.action_command_palette()
+            return
+
         if self._state is None:
             return
 
@@ -659,15 +672,12 @@ class SampleManagerApp(App):
             self._enter_waveform_nav()
             return
 
-        action = resolve_key(event.key)
         if action is None:
             return
 
         event.stop()
 
-        if action == "quit":
-            self.exit()
-        elif action == "move_up":
+        if action == "move_up":
             if self._active_pane == "stage":
                 self._stage_focused_index = max(0, self._stage_focused_index - 1)
             elif self._filter_query:
@@ -712,12 +722,8 @@ class SampleManagerApp(App):
                 self._cycle_pane_focus()
             else:
                 self._handle_go_back()
-        elif action == "show_help":
-            self.push_screen(HelpScreen())
         elif action == "edit_tags":
             self.action_edit_tags()
-        elif action == "command_palette":
-            self.action_command_palette()
         elif action == "cycle_pane_focus":
             self._cycle_pane_focus()
         elif action == "next_library_root":
