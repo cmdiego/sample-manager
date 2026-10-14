@@ -14,7 +14,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Static
 
 from ..audio import AudioPlayer, PlaybackStatus, WaveformData, WaveformService
-from ..config import get_config_path, load_config, normalize_config
+from ..config import (
+    add_library_root, ensure_config_exists, get_config_path, load_config,
+    normalize_config, save_config,
+)
 from ..db import Db
 from ..migrations import apply_migrations
 from .data import TuiDataSource
@@ -26,6 +29,7 @@ from .widgets.help_screen import HelpScreen
 from .widgets.settings_screen import SettingsScreen
 from .nav_state import NavState, NavItem, build_items
 from .widgets.action_pane import ActionPane
+from .widgets.add_library_screen import AddLibraryScreen
 from .widgets.browser_zone import BrowserZone
 from .widgets.file_tree import SampleListWidget
 from .widgets.selection_list import SelectedFilesListWidget
@@ -57,6 +61,7 @@ class SampleManagerApp(App):
     TITLE = "Sample Manager"
     BINDINGS = [
         Binding("f2", "show_settings", "Settings", priority=True),
+        Binding("f4", "add_library", "Add Folder", priority=True),
         Binding("f5", "rescan_library", "Rescan", priority=True),
     ]
 
@@ -128,7 +133,7 @@ class SampleManagerApp(App):
             yield BrowserZone(_placeholder, id="browser-zone")
             yield SelectedFilesListWidget(id="selection-list")
         yield Static(
-            "  F2 settings · F5 rescan · / search · ? help · q quit",
+            "  F2 settings · F4 add folder · F5 rescan · / search · ? help · q quit",
             id="status-bar",
             markup=False,
         )
@@ -146,13 +151,13 @@ class SampleManagerApp(App):
             self._apply_preferences(load_tui_preferences(self._config_path), persist=False)
         self._db = _open_db(self._config_path) if self._config_path else _open_db()
         if self._db is None:
-            self._set_status("  Config not found. Run `sampleman init`, then `sampleman scan <path>`.")
+            self._set_status("  F4 Add Folder to start your sample library · F2 Settings · q Quit")
             return
 
         self._data = TuiDataSource(self._db)
         roots = self._data.get_library_roots()
         if not roots:
-            self._set_status("  No indexed library roots. Run `sampleman scan <path>` or use GUI Add Folder.")
+            self._set_status("  No sample libraries yet. Press F4 Add Folder to index your samples.")
             return
 
         # Skip stale database roots so opening the TUI never crashes on a
@@ -162,7 +167,7 @@ class SampleManagerApp(App):
             if (path := Path(row["path"])).is_dir()
         )
         if not self._library_roots:
-            self._set_status("  Indexed library folders are unavailable. Reconnect a folder or scan a new one.")
+            self._set_status("  Library folders are unavailable. Reconnect them or press F4 Add Folder.")
             return
         configured = normalize_config(load_config(self._config_path or get_config_path())).get(
             "default_library_root"
@@ -185,6 +190,7 @@ class SampleManagerApp(App):
         """Make Settings searchable from Textual's existing command palette."""
         yield from super().get_system_commands(screen)
         yield SystemCommand("Settings", "Audio output and auto-audition preferences", self.action_show_settings)
+        yield SystemCommand("Add Folder", "Index a sample folder and select its library", self.action_add_library)
         yield SystemCommand("Rescan Library", "Index added, changed, and removed samples", self.action_rescan_library)
 
     def action_show_settings(self) -> None:
@@ -231,36 +237,69 @@ class SampleManagerApp(App):
 
     # ── background library scanning ────────────────────────────────────────
 
+    def action_add_library(self) -> None:
+        """Collect a new root even when the TUI has no configuration yet."""
+        if isinstance(self.screen, ModalScreen):
+            return
+        if self._scan_in_progress:
+            self.notify("Wait for the current library scan to finish")
+            return
+        self.push_screen(AddLibraryScreen(), callback=self._on_library_chosen)
+
+    def _on_library_chosen(self, root: Path | None) -> None:
+        """Initialize missing storage only after a valid path is submitted."""
+        if root is None:
+            return
+        try:
+            if self._data is None:
+                from ..profiles import create_example_profiles, get_profiles_dir
+
+                config_path, _created = ensure_config_exists(self._config_path)
+                create_example_profiles(get_profiles_dir(load_config(config_path)))
+                self._db = _open_db(config_path)
+                if self._db is None:
+                    raise ValueError("Set db_path in configuration before adding a folder")
+                self._data = TuiDataSource(self._db)
+            self._start_library_scan(root, activate=True)
+        except Exception as exc:  # noqa: BLE001 - show configuration/storage errors in the TUI
+            self.notify(f"Could not add folder: {exc}", severity="error", timeout=8)
+
     def action_rescan_library(self) -> None:
         """Start one background scan while leaving navigation responsive."""
         if isinstance(self.screen, ModalScreen):
             return
         if self._state is None or self._data is None:
-            self.notify("No indexed library selected. Run sampleman scan <folder> first.")
+            self.notify("No library selected. Press F4 Add Folder first.")
             return
+        self._start_library_scan(self._state.current_root)
+
+    def _start_library_scan(self, root: Path, *, activate: bool = False) -> None:
+        """Share one background scanner between adding and rescanning folders."""
         if self._scan_in_progress:
             self.notify("A library scan is already running")
             return
-        root = self._state.current_root
         self._scan_in_progress = True
         self._scan_message = f"Scanning {root.name}…"
-        self._set_status(self._build_status())
+        self._set_status(self._build_status() if self._state else self._scan_message)
         self.run_worker(
-            self._rescan_library(root), name="library-rescan", group="library-rescan",
+            self._rescan_library(root, activate=activate), name="library-rescan", group="library-rescan",
             exit_on_error=False,
         )
 
-    async def _rescan_library(self, root: Path) -> None:
+    async def _rescan_library(self, root: Path, *, activate: bool = False) -> None:
         """Run blocking I/O off-thread and refresh the TUI on its event loop."""
         try:
             result = await asyncio.to_thread(self._data.scan_directory, root)
+            if activate:
+                self._activate_added_library(root)
+            else:
+                self._refresh_after_scan(root)
         except asyncio.CancelledError:
             return  # Shutdown discards UI updates; the independent scan can finish.
         except Exception as exc:  # noqa: BLE001 - leave navigation available on failure
             self._scan_message = f"Scan failed: {exc}"
             self.notify(self._scan_message, severity="error", timeout=8)
         else:
-            self._refresh_after_scan(root)
             self._scan_message = (
                 f"Scanned {root.name}: {result.inserted} new, "
                 f"{result.updated} updated, {result.pruned} removed"
@@ -268,8 +307,24 @@ class SampleManagerApp(App):
             self.notify(self._scan_message, timeout=8)
         finally:
             self._scan_in_progress = False
-            if self.is_running and self._state is not None:
-                self._set_status(self._build_status())
+            if self.is_running:
+                self._set_status(self._build_status() if self._state else self._scan_message)
+
+    def _activate_added_library(self, root: Path) -> None:
+        """Select a completed scan and persist the same root for the next launch."""
+        self._library_roots = tuple(
+            path for row in self._data.get_library_roots()
+            if (path := Path(row["path"])).is_dir()
+        )
+        if root not in self._library_roots:
+            raise ValueError("The sample folder disappeared while scanning")
+        self._load_root(root)
+        try:
+            config_path = self._config_path or get_config_path()
+            config, _message = add_library_root(load_config(config_path), str(root), set_as_default=True)
+            save_config(config, config_path)
+        except Exception as exc:  # noqa: BLE001 - indexing already succeeded; retain its usable view
+            self.notify(f"Folder indexed, but startup preference could not be saved: {exc}", severity="warning", timeout=8)
 
     def _refresh_after_scan(self, scanned_root: Path) -> None:
         """Preserve browsing/search focus and refresh Stage after index changes."""

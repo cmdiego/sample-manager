@@ -69,14 +69,14 @@ def normalize_path(path_str: str) -> Path:
     return Path(expanded).resolve()
 
 
-def ensure_config_exists() -> tuple[Path, bool]:
+def ensure_config_exists(config_path: Path | None = None) -> tuple[Path, bool]:
     """
     Create config dir + file if missing (idempotent).
     
     Returns:
         (config_path, created: bool) - Path and whether it was newly created
     """
-    config_path = get_config_path()
+    config_path = config_path if config_path is not None else get_config_path()
     
     # Check if already exists
     if config_path.exists():
