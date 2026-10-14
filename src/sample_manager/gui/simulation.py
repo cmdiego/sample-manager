@@ -190,11 +190,27 @@ class GuiSimulationRuntime:
         ]
 
     def _dispatch_event(self, message: JsonObject, context: str) -> None:
+        """Send keyboard or mouse input through the real Qt widgets."""
         event = message["event"]
-        if event != "key":
-            raise AssertionError(f"{context}: unsupported event {event!r}")
-        key, modifiers = _parse_key_sequence(str(message.get("key", "")), context)
-        QTest.keyClick(self.window, key, modifiers)
+        if event == "key":
+            key, modifiers = _parse_key_sequence(str(message.get("key", "")), context)
+            QTest.keyClick(self.window, key, modifiers)
+            return
+        if event == "type_search":
+            text = message.get("text")
+            if not isinstance(text, str):
+                raise AssertionError(f"{context}: type_search.text must be a string")
+            field = self.window.browser.filter_field
+            field.setFocus()
+            QTest.keyClicks(field, text)
+            return
+        if event == "click_browser":
+            view = self.window.browser.view
+            index = view.model().index(0, 0)
+            pos = view.visualRect(index).center() if index.isValid() else view.viewport().rect().center()
+            QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=pos)
+            return
+        raise AssertionError(f"{context}: unsupported event {event!r}")
 
     def _dispatch_command(self, message: JsonObject, context: str) -> None:
         command = message["command"]
@@ -238,6 +254,13 @@ class GuiSimulationRuntime:
             for field in ("has_focus", "text"):
                 if field in message:
                     _assert_equal(state.get(field), message[field], f"{context}: filter.{field}")
+            return
+        if assertion == "stage_count":
+            _assert_equal(
+                self.window.controller.selection_summary().count,
+                _require_int(message, "count", context),
+                f"{context}: stage_count",
+            )
             return
         raise AssertionError(f"{context}: unsupported assertion {assertion!r}")
 

@@ -309,6 +309,22 @@ class TestSearchByTag:
 
 
 class TestSearchCombinedFilters:
+    def test_multiple_tags_with_name_and_path(self, engine, search_db):
+        """JOIN, WHERE, and HAVING placeholders bind in their SQL order."""
+        SampleTagRepo(search_db["db"]).attach(
+            search_db["samples"]["kick_hard.wav"]["id"],
+            search_db["tags"]["Bass"]["id"],
+        )
+        result = engine.search(name="hard", path="drums", tags=["Kick", "Bass"])
+        assert [item["filename"] for item in result.items] == ["kick_hard.wav"]
+
+    def test_parent_and_child_tag_groups_can_share_one_tag(self, engine):
+        """A Kick tag also fulfills an expanded Drums group."""
+        result = engine.search(tags=["Drums", "Kick"])
+        assert {item["filename"] for item in result.items} == {
+            "kick_hard.wav", "kick_soft.wav"
+        }
+
     def test_name_and_tag(self, engine):
         """Name + tag filters combine with AND."""
         result = engine.search(name="hard", tags=["Kick"])

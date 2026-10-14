@@ -80,6 +80,15 @@ class TestCollectSamples:
         assert "README.txt" not in filenames
         assert "notes.pdf" not in filenames
 
+    def test_indexes_wave_extension_supported_by_decoder(self, library_dir):
+        """The long WAV extension must not disappear from GUI search."""
+        sample = library_dir / "FL_FDS_09_Drum_Loop_Full_98.wave"
+        sample.write_bytes(b"RIFF")
+
+        names = {entry["filename"] for entry in collect_samples(library_dir)}
+
+        assert sample.name in names
+
     def test_returns_correct_metadata(self, library_dir):
         results = collect_samples(library_dir)
         by_name = {r["filename"]: r for r in results}

@@ -30,7 +30,7 @@ from .repos.sample_repo import SampleRepo
 # Common audio sample extensions (lowercase, with leading dot).
 # Users can override via the extensions parameter.
 DEFAULT_SAMPLE_EXTENSIONS: frozenset[str] = frozenset(
-    {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".mp4", ".wv"}
+    {".wav", ".wave", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".mp4", ".wv"}
 )
 
 

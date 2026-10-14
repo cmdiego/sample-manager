@@ -14,6 +14,7 @@ from __future__ import annotations
 from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
 
 from ...services.library_browser import BrowserItem
+from ..drag import SAMPLE_MIME_TYPE, sample_mime
 
 # Custom roles. Qt.UserRole is the first value safe for application use.
 PathRole = Qt.ItemDataRole.UserRole + 1
@@ -43,7 +44,9 @@ class BrowserListModel(QAbstractListModel):
         item = self._items[index.row()]
 
         if role == Qt.ItemDataRole.DisplayRole:
-            return item.name
+            return f"{item.name} — {item.context}" if item.context else item.name
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return str(item.path)
         if role == PathRole:
             return str(item.path)
         if role == IsDirRole:
@@ -55,6 +58,30 @@ class BrowserListModel(QAbstractListModel):
         if role == MetaRole:
             return self._meta_string(item)
         return None
+
+    def flags(self, index: QModelIndex) -> Qt.ItemFlag:
+        """Allow only indexed sample rows to start a copy drag."""
+        flags = super().flags(index)
+        if index.isValid() and self._items[index.row()].sample_id is not None:
+            flags |= Qt.ItemFlag.ItemIsDragEnabled
+        return flags
+
+    def mimeTypes(self) -> list[str]:  # noqa: N802
+        """Advertise the internal sample payload to Qt's drag machinery."""
+        return [SAMPLE_MIME_TYPE]
+
+    def mimeData(self, indexes: list[QModelIndex]):  # noqa: N802
+        """Copy the first indexed sample from the single-selection browser."""
+        for index in indexes:
+            if index.isValid():
+                sample_id = self._items[index.row()].sample_id
+                if sample_id is not None:
+                    return sample_mime(sample_id)
+        return None
+
+    def supportedDragActions(self) -> Qt.DropAction:  # noqa: N802
+        """Dragging copies a sample into Stage; it does not move the file."""
+        return Qt.DropAction.CopyAction
 
     def roleNames(self):  # noqa: N802
         names = super().roleNames()

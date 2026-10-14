@@ -1,7 +1,6 @@
-"""Browser zone — filter field + path breadcrumb + directory list view.
+"""Browser zone — indexed search field, breadcrumb, and result list view.
 
-Presentation-only. It renders whatever model the controller supplies (wrapped in
-a case-insensitive prefix filter proxy) and forwards user intent (navigation,
+Presentation-only. It renders whatever model the controller supplies and forwards user intent (navigation,
 selection toggles, focus changes) back to the controller via signals. It never
 issues SQL.
 """
@@ -12,6 +11,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QModelIndex, QPoint, QSortFilterProxyModel, Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QLabel,
     QLineEdit,
     QListView,
@@ -36,6 +36,7 @@ class BrowserWidget(QWidget):
     add_to_selection_requested = Signal(int)
     remove_from_selection_requested = Signal(int)
     open_externally_requested = Signal(str)
+    search_changed = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -47,13 +48,18 @@ class BrowserWidget(QWidget):
 
         self._filter = QLineEdit()
         self._filter.setObjectName("BrowserFilter")
-        self._filter.setPlaceholderText("Filter by name…")
+        self._filter.setPlaceholderText("Search library by name, path, or tag…")
         self._filter.setClearButtonEnabled(True)
         # Click-focus only: the filter must not auto-grab keyboard focus on
         # startup (that would disable the nav shortcuts via the typing guard).
         # The "/" shortcut focuses it explicitly, which still works.
         self._filter.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         layout.addWidget(self._filter)
+
+        self._search_feedback = QLabel("")
+        self._search_feedback.setObjectName("BrowserSearchFeedback")
+        self._search_feedback.hide()
+        layout.addWidget(self._search_feedback)
 
         self._breadcrumb = QLabel("")
         self._breadcrumb.setObjectName("BrowserBreadcrumb")
@@ -64,6 +70,8 @@ class BrowserWidget(QWidget):
         self._view.setObjectName("BrowserList")
         self._view.setUniformItemSizes(True)
         self._view.setSelectionMode(QListView.SelectionMode.SingleSelection)
+        self._view.setDragEnabled(True)
+        self._view.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         # The list must not take keyboard focus: otherwise its built-in arrow-key
         # navigation and type-ahead search would consume J/K/H/L/arrows via
@@ -73,9 +81,8 @@ class BrowserWidget(QWidget):
         layout.addWidget(self._view, stretch=1)
 
         self._proxy = QSortFilterProxyModel(self)
-        self._proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        # Prefix match on the display name.
-        self._proxy.setFilterKeyColumn(0)
+        # The proxy maps result indexes to the source model for navigation and
+        # drag. Search itself runs over the indexed library in the service.
 
         self._filter.textChanged.connect(self._on_filter_text)
         self._view.doubleClicked.connect(self._on_activated)
@@ -145,6 +152,18 @@ class BrowserWidget(QWidget):
     def clear_filter(self) -> None:
         self._filter.clear()
 
+    def set_search_feedback(self, query: str, count: int) -> None:
+        """Show whether the active library search found indexed samples."""
+        self._search_feedback.setVisible(bool(query.strip()))
+        if query.strip():
+            suffix = " (showing up to 500)" if count >= 500 else ""
+            message = f"{count} indexed matches{suffix}"
+            if count == 0:
+                message += " · Scan the library if a file is missing"
+            else:
+                message += " · Enter or click to audition"
+            self._search_feedback.setText(message)
+
     def filter_has_focus(self) -> bool:
         return self._filter.hasFocus()
 
@@ -155,15 +174,8 @@ class BrowserWidget(QWidget):
     # -- internal slots -------------------------------------------------------
 
     def _on_filter_text(self, text: str) -> None:
-        # Case-insensitive prefix match: anchor the pattern at the start.
-        if text:
-            self._proxy.setFilterRegularExpression(f"^{_escape(text)}")
-        else:
-            self._proxy.setFilterFixedString("")
-        # Preserve the focused row if it survived the filter; otherwise focus the
-        # first remaining match so the preview never points at a hidden row.
-        if not self._view.currentIndex().isValid():
-            self.focus_first()
+        """Forward search text; the controller owns the root-wide result set."""
+        self.search_changed.emit(text)
 
     def _on_context_menu(self, pos: QPoint) -> None:
         index = self._view.indexAt(pos)
@@ -214,10 +226,3 @@ class BrowserWidget(QWidget):
             return
         sample_id = current.data(SampleIdRole)
         self.focus_changed.emit(int(sample_id) if sample_id is not None else -1)
-
-
-def _escape(text: str) -> str:
-    """Escape regex metacharacters so the filter matches literal input."""
-    import re
-
-    return re.escape(text)

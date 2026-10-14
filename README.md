@@ -98,8 +98,14 @@ Audio is routed to the operating system's default output device. Choose
 available output-capable system audio device, or **None**; changes apply
 immediately.
 
-Playback shortcuts: **Space** pauses active playback or starts the focused sample
-from the beginning; **Ctrl+Space** resumes a paused sample from its saved position.
+Playback shortcuts: **Space** pauses or resumes the current sample, or starts the
+focused sample when idle; **Ctrl+Space** also resumes a paused sample. Search the
+indexed library with **/**, type any filename or path fragment, then press
+**Escape** to clear results or click outside the field to return to browser
+shortcuts. While search has focus, **Space** still controls playback and
+**Shift+Space** inserts a space into a multi-word query. Drag an indexed Browser
+sample into **Stage** to add it. Typing a query does not interrupt the current
+sample; press **Enter**, **Down**, or click a result to audition it.
 
 > **Screenshots:** GUI screenshots are pending — they can't be captured in the
 > current headless CI environment and will be added once a display-backed
@@ -178,6 +184,9 @@ sampleman scan /path/to/samples
 sampleman scan /path/to/samples --rescan
 sampleman scan /path/to/samples --fast
 ```
+
+If a library was scanned before `.wave` support was added, scan that root again
+to index those files. The GUI searches indexed samples in the active library root.
 
 Check indexed library status:
 

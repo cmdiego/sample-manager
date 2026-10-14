@@ -36,14 +36,15 @@ class SampleListWidget(VerticalScroll):
     def compose(self) -> ComposeResult:
         yield Static("  (loading...)", id="tree-placeholder")
 
-    def update(self, state: NavState) -> None:
+    def update(self, state: NavState, *, empty_label: str = "empty directory") -> None:
+        """Render the current rows with a truthful empty-state message."""
         prev_index = self._prev_focused_index
         self._state = state
         self.border_title = str(state.current_dir)
         self.remove_children()
 
         if not state.items:
-            self.mount(Static("  (empty directory)", id="tree-placeholder"))
+            self.mount(Static(f"  ({empty_label})", id="tree-placeholder"))
             self._prev_focused_index = -1
             return
 

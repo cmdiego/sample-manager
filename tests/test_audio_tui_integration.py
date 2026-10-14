@@ -69,7 +69,8 @@ def test_directory_does_not_replace_audio_and_allows_file_reaudition():
     assert player.played == [file_item.path, file_item.path]
 
 
-def test_space_pauses_then_restarts_focused_file():
+def test_space_pauses_then_resumes_focused_file():
+    """The TUI transport key resumes rather than discarding a checkpoint."""
     player = FakePlayer()
     app = SampleManagerApp(audio_player=player)
     file_item = _item("kick.wav")
@@ -80,7 +81,8 @@ def test_space_pauses_then_restarts_focused_file():
         app._toggle_playback()
         app._toggle_playback()
     assert player.paused == 1
-    assert player.restarted == [file_item.path]
+    assert player.played == [file_item.path, file_item.path]
+    assert player.restarted == []
 
 
 def test_space_toggles_playback_even_while_filtering():

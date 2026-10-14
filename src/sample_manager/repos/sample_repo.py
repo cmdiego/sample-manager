@@ -68,6 +68,45 @@ class SampleRepo:
         )
         return [dict(r) for r in rows]
 
+    def search_by_text(
+        self, library_root_id: int, query: str, *, limit: int = 500
+    ) -> list[dict]:
+        """Find indexed samples in one root using every whitespace-separated term.
+
+        Each term may occur anywhere in the filename, relative path, tag name,
+        shorthand, or tag alias. ``instr`` treats punctuation literally, so a
+        sample name containing underscores or percent signs needs no SQL escaping.
+        """
+        terms = query.lower().split()
+        if not terms:
+            return []
+
+        # Correlated tag lookup avoids duplicate sample rows when several tags
+        # match. Independent term clauses let ``drum loop`` match across fields.
+        term_sql = (
+            "(instr(lower(s.filename), ?) > 0 OR instr(s.rel_path_norm, ?) > 0 "
+            "OR EXISTS (SELECT 1 FROM sample_tag st "
+            "JOIN tag t ON t.id = st.tag_id "
+            "LEFT JOIN tag_alias ta ON ta.tag_id = t.id "
+            "WHERE st.sample_id = s.id AND t.is_hidden = 0 AND "
+            "(instr(t.name_norm, ?) > 0 OR instr(t.shorthand_norm, ?) > 0 "
+            "OR instr(ta.alias_norm, ?) > 0)))"
+        )
+        clauses = " AND ".join(term_sql for _ in terms)
+        params: list[str | int] = [library_root_id]
+        for term in terms:
+            params.extend((term, term, term, term, term))
+        # Prefer filename hits to path/tag-only hits, then keep the list stable.
+        params.extend((query.lower().strip(), max(1, limit)))
+        rows = self._db.fetchall(
+            "SELECT s.* FROM sample s WHERE s.library_root_id = ? AND "
+            + clauses
+            + " ORDER BY CASE WHEN instr(lower(s.filename), ?) > 0 "
+            "THEN 0 ELSE 1 END, lower(s.filename), s.rel_path_norm LIMIT ?",
+            tuple(params),
+        )
+        return [dict(row) for row in rows]
+
     def count_by_root(self, library_root_id: int) -> int:
         """Return the number of samples belonging to a library root."""
         val = self._db.fetchval(

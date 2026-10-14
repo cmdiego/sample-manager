@@ -77,6 +77,7 @@ class SampleManagerApp(App):
         # Typeahead filter state
         self._filter_active: bool = False
         self._filter_query: str = ""
+        self._filter_focused_index: int = 0
         self._last_auditioned_path: Path | None = None
         self._waveform_path: Path | None = None
         self._waveform_data: WaveformData | None = None
@@ -145,7 +146,7 @@ class SampleManagerApp(App):
         if not self._filter_query:
             return items
         q = self._filter_query.lower()
-        return tuple(it for it in items if it.name.lower().startswith(q))
+        return tuple(it for it in items if q in it.name.lower())
 
     # ── UI refresh ─────────────────────────────────────────────────────────
 
@@ -155,18 +156,24 @@ class SampleManagerApp(App):
 
         # Build a filtered view of the current state for the sample list
         filtered = self._visible_items()
+        # Keep the rendered cursor and the action target on the same filtered
+        # index. The underlying directory cursor is left intact for Escape.
+        filtered_index = min(self._filter_focused_index, len(filtered) - 1)
         display_state = NavState(
             library_roots=self._state.library_roots,
             current_root=self._state.current_root,
             current_dir=self._state.current_dir,
             dir_stack=self._state.dir_stack,
             items=filtered,
-            focused_index=0 if filtered else -1,
+            focused_index=filtered_index if self._filter_query else self._state.focused_index,
             selection_ids=self._state.selection_ids,
         )
 
         browser: BrowserZone = self.query_one("#browser-zone", BrowserZone)
-        browser.sample_list.update(display_state)
+        browser.sample_list.update(
+            display_state,
+            empty_label="no matches" if self._filter_query else "empty directory",
+        )
         browser.filters_panel.update_filter(self._filter_query)
 
         # Session summary
@@ -268,20 +275,23 @@ class SampleManagerApp(App):
                 return
             if event.key == "backspace":
                 self._filter_query = self._filter_query[:-1]
+                self._filter_focused_index = 0
                 if not self._filter_query:
                     self._cancel_filter()
                 else:
                     self._refresh_ui()
                 event.stop()
                 return
-            if event.character and event.character.isprintable():
+            # Arrows and Return navigate search results; letters remain text so
+            # users can type names containing j, k, or l.
+            if event.key in ("up", "down", "left", "right", "enter"):
+                pass  # fall through to KEYMAP
+            elif event.character and event.character.isprintable():
                 self._filter_query += event.character
+                self._filter_focused_index = 0
                 self._refresh_ui()
                 event.stop()
                 return
-            # Allow navigation keys through even in filter mode
-            if event.key in ("j", "k", "up", "down", "l", "right", "enter"):
-                pass  # fall through to KEYMAP
             else:
                 return
 
@@ -303,10 +313,18 @@ class SampleManagerApp(App):
         if action == "quit":
             self.exit()
         elif action == "move_up":
-            self._state = self._state.move_up()
+            if self._filter_query:
+                self._filter_focused_index = max(0, self._filter_focused_index - 1)
+            else:
+                self._state = self._state.move_up()
             self._refresh_ui()
         elif action == "move_down":
-            self._state = self._state.move_down()
+            if self._filter_query:
+                self._filter_focused_index = min(
+                    len(self._visible_items()) - 1, self._filter_focused_index + 1
+                )
+            else:
+                self._state = self._state.move_down()
             self._refresh_ui()
         elif action == "go_back":
             self._handle_go_back()
@@ -339,9 +357,10 @@ class SampleManagerApp(App):
     # ── playback ──────────────────────────────────────────────────────────
 
     def _effective_focused_item(self) -> NavItem | None:
+        """Return the row actually highlighted in the filtered or directory view."""
         if self._filter_query:
             visible = self._visible_items()
-            return visible[0] if visible else None
+            return visible[self._filter_focused_index] if visible else None
         return self._state.focused_item if self._state is not None else None
 
     def _audition_focused(self) -> None:
@@ -355,9 +374,14 @@ class SampleManagerApp(App):
         self._audio_player.play(item.path)
 
     def _toggle_playback(self) -> None:
+        """Pause or resume the current sample, starting the focus if idle."""
         playback = self._audio_player.snapshot()
         if playback.status in (PlaybackStatus.PLAYING, PlaybackStatus.LOADING):
             self._audio_player.pause()
+            self._set_status(self._build_status())
+            return
+        if playback.status is PlaybackStatus.PAUSED and playback.path is not None:
+            self._audio_player.play(playback.path)
             self._set_status(self._build_status())
             return
         item = self._effective_focused_item()
@@ -490,26 +514,24 @@ class SampleManagerApp(App):
     # ── filter ─────────────────────────────────────────────────────────────
 
     def _start_filter(self) -> None:
+        """Start a fresh typeahead query in the current directory."""
         self._filter_active = True
         self._filter_query = ""
+        self._filter_focused_index = 0
         self._refresh_ui()
 
     def _cancel_filter(self) -> None:
+        """Restore the directory cursor and leave typeahead mode."""
         self._filter_active = False
         self._filter_query = ""
+        self._filter_focused_index = 0
         self._refresh_ui()
 
     # ── navigation ─────────────────────────────────────────────────────────
 
     def _handle_enter(self) -> None:
         # In filter mode, navigate within filtered results
-        item = self._state.focused_item
-        if self._filter_query:
-            # Find what's actually visible and use its focused item
-            visible = self._visible_items()
-            if not visible:
-                return
-            item = visible[0]
+        item = self._effective_focused_item()
 
         if item is None:
             return
@@ -532,13 +554,7 @@ class SampleManagerApp(App):
         directory or adds/removes the focused file from the persistent selection buffer.
         The l/→ key keeps its existing behavior (open the ActionPane modal).
         """
-        item = self._state.focused_item
-        if self._filter_query:
-            # In filter mode, act on the first visible item
-            visible = self._visible_items()
-            if not visible:
-                return
-            item = visible[0]
+        item = self._effective_focused_item()
 
         if item is None:
             return
@@ -571,7 +587,8 @@ class SampleManagerApp(App):
         self._refresh_ui()
 
     def _add_focused(self) -> None:
-        item = self._state.focused_item
+        """Add the currently visible row, including a non-first search hit."""
+        item = self._effective_focused_item()
         if item is None or item.sample_id is None:
             return
         self._data.add_to_selection(item.sample_id)
@@ -580,7 +597,8 @@ class SampleManagerApp(App):
         self._refresh_ui()
 
     def _remove_focused(self) -> None:
-        item = self._state.focused_item
+        """Remove the currently visible row from the persistent selection."""
+        item = self._effective_focused_item()
         if item is None or item.sample_id is None:
             return
         self._data.remove_from_selection(item.sample_id)

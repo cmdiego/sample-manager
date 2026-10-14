@@ -138,7 +138,9 @@ class SearchEngine:
         select_cols = ", ".join(_SELECT_COLUMNS)
         from_clause = "FROM sample s"
         where_clauses: list[str] = []
-        params: list = []
+        join_params: list = []
+        where_params: list = []
+        having_params: list = []
         group_by = ""
         having = ""
 
@@ -156,23 +158,20 @@ class SearchEngine:
                 f" JOIN sample_tag st ON st.sample_id = s.id"
                 f" AND st.tag_id IN ({placeholders})"
             )
-            params.extend(sorted(all_tag_ids))
+            join_params.extend(sorted(all_tag_ids))
 
             if len(tag_groups) > 1:
-                # For AND semantics: build a CASE expression that maps each
-                # tag_id to its group index, then require all groups present.
-                case_parts: list[str] = []
-                for i, group in enumerate(tag_groups):
+                # Test every group independently. Expanded parent/child groups
+                # can overlap, and one tag is allowed to satisfy both groups.
+                group_checks: list[str] = []
+                for group in tag_groups:
                     tag_list = ", ".join("?" * len(group))
-                    case_parts.append(
-                        f"WHEN st.tag_id IN ({tag_list}) THEN {i}"
+                    group_checks.append(
+                        f"SUM(CASE WHEN st.tag_id IN ({tag_list}) THEN 1 ELSE 0 END) > 0"
                     )
-                    params.extend(sorted(group))
-                case_expr = "CASE " + " ".join(case_parts) + " END"
+                    having_params.extend(sorted(group))
                 group_by = "GROUP BY s.id"
-                having = (
-                    f"HAVING COUNT(DISTINCT ({case_expr})) = {len(tag_groups)}"
-                )
+                having = "HAVING " + " AND ".join(group_checks)
             else:
                 # Single tag group — just need the JOIN, no GROUP BY needed
                 # but we need DISTINCT to avoid duplicates
@@ -181,21 +180,23 @@ class SearchEngine:
         # Name filter
         if name is not None:
             where_clauses.append("s.filename LIKE ?")
-            params.append(f"%{name}%")
+            where_params.append(f"%{name}%")
 
         # Path filter
         if path is not None:
             normalized_path = path.lower()
             where_clauses.append("s.rel_path_norm LIKE ?")
-            params.append(f"%{normalized_path}%")
+            where_params.append(f"%{normalized_path}%")
 
         where_sql = ""
         if where_clauses:
             where_sql = "WHERE " + " AND ".join(where_clauses)
 
         # Count query (same filters, no pagination)
+        # Bind parameters in SQL appearance order: JOIN, WHERE, then HAVING.
+        params = tuple(join_params + where_params + having_params)
         count_sql = f"SELECT COUNT(*) FROM (SELECT s.id {from_clause} {where_sql} {group_by} {having})"
-        total = self._db.fetchval(count_sql, tuple(params)) or 0
+        total = self._db.fetchval(count_sql, params) or 0
 
         # Calculate pagination
         total_pages = math.ceil(total / page_size) if total > 0 else 0
