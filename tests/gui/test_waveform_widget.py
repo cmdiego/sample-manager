@@ -179,3 +179,86 @@ def test_zoom_window_never_leaves_bounds(qtbot):
     widget.zoom(cursor_fraction=1.0, zoom_in=True)
     assert widget.zoom_start >= 0.0
     assert widget.zoom_end <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# T021: click-to-seek tests (must FAIL before T022 is implemented)
+# ---------------------------------------------------------------------------
+
+def test_click_emits_seek_requested_signal(qtbot):
+    """A click (press + release within threshold) emits seek_requested."""
+    widget = _ready_widget(qtbot)
+    emitted = []
+    widget.seek_requested.connect(emitted.append)
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    # Click at x=75 on a 300px-wide widget → fraction ≈ 0.25.
+    QTest.mouseClick(widget, Qt.MouseButton.LeftButton, pos=QPoint(75, 50))
+    assert len(emitted) == 1
+    assert abs(emitted[0] - 0.25) < 0.05
+
+
+def test_drag_does_not_emit_seek_requested(qtbot):
+    """A drag (large horizontal movement) must NOT emit seek_requested."""
+    widget = _ready_widget(qtbot)
+    emitted = []
+    widget.seek_requested.connect(emitted.append)
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    # Press, move far right (well beyond threshold), release.
+    QTest.mousePress(widget, Qt.MouseButton.LeftButton, pos=QPoint(10, 50))
+    QTest.mouseMove(widget, QPoint(200, 50))
+    QTest.mouseRelease(widget, Qt.MouseButton.LeftButton, pos=QPoint(200, 50))
+    assert emitted == []
+
+
+def test_seek_respects_zoom_window(qtbot):
+    """Click fraction accounts for the current zoom window."""
+    widget = _ready_widget(qtbot)
+    widget._zoom_start = 0.25
+    widget._zoom_end = 0.75
+    emitted = []
+    widget.seek_requested.connect(emitted.append)
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    # Click at 50% of widget width (x=150 on 300px widget).
+    # File fraction = 0.25 + 0.5 * 0.5 = 0.5
+    QTest.mouseClick(widget, Qt.MouseButton.LeftButton, pos=QPoint(150, 50))
+    assert len(emitted) == 1
+    assert abs(emitted[0] - 0.5) < 0.05
+
+
+def test_click_not_emitted_when_loading(qtbot):
+    """No seek signal when the widget is in LOADING state."""
+    widget = _make_widget(qtbot, service=None)
+    widget.set_path(Path("/tmp/kick.wav"))  # state = LOADING (no service)
+    emitted = []
+    widget.seek_requested.connect(emitted.append)
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    QTest.mouseClick(widget, Qt.MouseButton.LeftButton, pos=QPoint(100, 50))
+    assert emitted == []
+
+
+def test_seek_fraction_clamped_to_unit_interval(qtbot):
+    """Emitted fraction is always in [0.0, 1.0]."""
+    widget = _ready_widget(qtbot)
+    emitted = []
+    widget.seek_requested.connect(emitted.append)
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    # Click at x=0 (left edge).
+    QTest.mouseClick(widget, Qt.MouseButton.LeftButton, pos=QPoint(0, 50))
+    assert len(emitted) >= 1
+    for frac in emitted:
+        assert 0.0 <= frac <= 1.0

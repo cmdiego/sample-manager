@@ -179,3 +179,78 @@ def test_close_is_idempotent_and_closes_output():
     player.close()
     player.close()
     assert output.closed
+
+
+# ---------------------------------------------------------------------------
+# seek() tests
+# ---------------------------------------------------------------------------
+
+def test_seek_while_playing_restarts_from_target_frame():
+    output = FakeOutput()
+    player = AudioPlayer(decoder=lambda path: _audio(frames=100, sample_rate=10), output=output)
+    try:
+        player.play(Path("kick.wav"))
+        _wait_for(player, PlaybackStatus.PLAYING)
+        output.cursor = 10  # simulate some playback
+
+        player.seek(5.0)  # 5 seconds × 10 fps = frame 50
+        _wait_for(player, PlaybackStatus.PLAYING)
+        assert output.starts[-1][1] == 50
+    finally:
+        player.close()
+
+
+def test_seek_while_paused_updates_position_no_output_call():
+    output = FakeOutput()
+    player = AudioPlayer(decoder=lambda path: _audio(frames=100, sample_rate=10), output=output)
+    try:
+        player.play(Path("kick.wav"))
+        _wait_for(player, PlaybackStatus.PLAYING)
+        player.pause()
+        starts_before = len(output.starts)
+
+        player.seek(3.0)  # frame 30
+        assert player.snapshot().position_seconds == pytest.approx(3.0)
+        assert len(output.starts) == starts_before  # output.start() NOT called again
+    finally:
+        player.close()
+
+
+def test_seek_when_idle_no_audio_loaded_is_noop():
+    output = FakeOutput()
+    player = AudioPlayer(decoder=lambda path: _audio(), output=output)
+    try:
+        # No play() called, audio never loaded
+        player.seek(2.0)  # must not raise
+        assert player.snapshot().status is PlaybackStatus.IDLE
+        assert len(output.starts) == 0
+    finally:
+        player.close()
+
+
+def test_seek_clamps_negative_to_frame_zero():
+    output = FakeOutput()
+    player = AudioPlayer(decoder=lambda path: _audio(frames=100, sample_rate=10), output=output)
+    try:
+        player.play(Path("kick.wav"))
+        _wait_for(player, PlaybackStatus.PLAYING)
+
+        player.seek(-5.0)
+        _wait_for(player, PlaybackStatus.PLAYING)
+        assert output.starts[-1][1] == 0
+    finally:
+        player.close()
+
+
+def test_seek_clamps_past_end_to_last_frame():
+    output = FakeOutput()
+    player = AudioPlayer(decoder=lambda path: _audio(frames=100, sample_rate=10), output=output)
+    try:
+        player.play(Path("kick.wav"))
+        _wait_for(player, PlaybackStatus.PLAYING)
+
+        player.seek(999.0)  # way past the end
+        _wait_for(player, PlaybackStatus.PLAYING)
+        assert output.starts[-1][1] == 99  # last valid frame index
+    finally:
+        player.close()

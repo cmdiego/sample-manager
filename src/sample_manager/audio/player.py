@@ -157,6 +157,32 @@ class AudioPlayer:
             error=error,
         )
 
+    def seek(self, position_seconds: float) -> None:
+        """Seek the current file to *position_seconds*.
+
+        No-op when no file is loaded, no audio is decoded, or the player is closed.
+        If playing: stops the output and restarts from the target frame.
+        If paused: updates position so the next play resumes from there.
+        If idle/loading: updates position for the next play call.
+        """
+        with self._lock:
+            if self._closed or self._path is None or self._audio is None:
+                return
+            sample_rate = self._audio.sample_rate
+            frames = self._audio.frames
+            target = max(0, min(int(position_seconds * sample_rate), frames - 1))
+            was_playing = self._status is PlaybackStatus.PLAYING
+            if not was_playing:
+                self._position_frames = target
+                return
+            self._generation += 1
+            generation = self._generation
+            self._position_frames = target
+            self._status = PlaybackStatus.LOADING
+            path = self._path
+        self._output.pause()
+        self._commands.put((generation, path))
+
     def close(self) -> None:
         """Release the worker and output device. Safe to call repeatedly."""
         with self._lock:

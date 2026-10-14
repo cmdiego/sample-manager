@@ -19,7 +19,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -37,6 +37,7 @@ _LOADING = QColor(0x88, 0x88, 0x88)
 _ERROR = QColor(0xD0, 0x40, 0x40)
 
 _MIN_ZOOM_SPAN = 0.05  # never show less than 5% of the file
+_CLICK_THRESHOLD_PX = 4  # max horizontal travel to distinguish click from drag
 
 
 class _State(Enum):
@@ -48,6 +49,9 @@ class _State(Enum):
 
 class WaveformWidget(QWidget):
     """Draws the focused file's waveform, playhead, and played region."""
+
+    # Emits a normalized file position [0.0, 1.0] when the user clicks the waveform.
+    seek_requested = Signal(float)
 
     def __init__(self, service: "WaveformService | None" = None, parent=None) -> None:
         super().__init__(parent)
@@ -234,7 +238,15 @@ class WaveformWidget(QWidget):
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if self._pan_anchor_x is not None:
+            release_x = event.position().x()
+            was_click = abs(release_x - self._pan_anchor_x) < _CLICK_THRESHOLD_PX
             self._pan_anchor_x = None
+            if was_click and self._state is _State.READY:
+                width = max(1, self.width())
+                raw = self._zoom_start + (release_x / width) * (
+                    self._zoom_end - self._zoom_start
+                )
+                self.seek_requested.emit(max(0.0, min(1.0, raw)))
             event.accept()
             return
         super().mouseReleaseEvent(event)

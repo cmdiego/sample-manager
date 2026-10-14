@@ -20,7 +20,7 @@ from ...services.library_browser import SampleDetails
 from .waveform import WaveformWidget
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ...audio.player import PlaybackSnapshot
+    from ...audio.player import AudioPlayer, PlaybackSnapshot
     from ...audio.waveform import WaveformService
 
 
@@ -71,6 +71,14 @@ class PreviewWidget(QWidget):
     @property
     def waveform(self) -> WaveformWidget:
         return self._waveform
+
+    def connect_player(self, player: "AudioPlayer") -> None:
+        """Wire waveform click-to-seek into *player*."""
+        self._waveform.seek_requested.connect(
+            lambda frac: player.seek(
+                frac * (player.snapshot().duration_seconds or 0.0)
+            )
+        )
 
     def set_waveform_service(self, service: "WaveformService | None") -> None:
         self._waveform.set_service(service)

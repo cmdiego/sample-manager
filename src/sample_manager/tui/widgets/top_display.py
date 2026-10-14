@@ -96,6 +96,11 @@ class TopDisplayWidget(Widget):
         if waveform is not None:
             waveform.set_progress(progress if waveform.path == path else 0.0)
 
+    def set_nav_cursor(self, fraction: float | None) -> None:
+        waveform = self._waveform_widget()
+        if waveform is not None:
+            waveform.set_nav_cursor(fraction)
+
     def _waveform_widget(self) -> WaveformWidget | None:
         try:
             return self.query(WaveformWidget).first()

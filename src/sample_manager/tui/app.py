@@ -81,6 +81,10 @@ class SampleManagerApp(App):
         self._waveform_path: Path | None = None
         self._waveform_data: WaveformData | None = None
         self._waveform_generation = 0
+        # Waveform navigation mode state
+        self._waveform_nav_active: bool = False
+        self._nav_cursor_fraction: float = 0.0
+        self._nav_display_width: int = 80
 
     # ── compose ────────────────────────────────────────────────────────────
 
@@ -230,6 +234,32 @@ class SampleManagerApp(App):
                 self._resume_playback()
             return
 
+        # Waveform navigation mode intercepts movement and confirm/exit keys.
+        if self._waveform_nav_active:
+            nav_keys = {
+                "left": "fine_left",
+                "h": "fine_left",
+                "right": "fine_right",
+                "l": "fine_right",
+                "shift+left": "coarse_left",
+                "shift+right": "coarse_right",
+                "home": "home",
+                "end": "end",
+            }
+            if event.key in nav_keys:
+                event.stop()
+                self._waveform_nav_move(nav_keys[event.key])
+                return
+            if event.key in ("enter",):
+                event.stop()
+                self._exit_waveform_nav(seek=True)
+                return
+            if event.key in ("escape",):
+                event.stop()
+                self._exit_waveform_nav(seek=False)
+                return
+            # All other keys (space, j/k, etc.) fall through.
+
         # In filter mode, capture raw characters before KEYMAP lookup
         if self._filter_active:
             if event.key == "escape":
@@ -256,6 +286,12 @@ class SampleManagerApp(App):
                 return
 
         if self._state is None:
+            return
+
+        # Activate waveform nav mode (w key, outside KEYMAP to keep it exclusive).
+        if event.key == "w" and not self._filter_active:
+            event.stop()
+            self._enter_waveform_nav()
             return
 
         action = resolve_key(event.key)
@@ -347,6 +383,58 @@ class SampleManagerApp(App):
                 progress,
             )
             self._set_status(self._build_status())
+
+    # ── waveform navigation mode ───────────────────────────────────────────
+
+    def _enter_waveform_nav(self) -> None:
+        """Activate waveform nav mode, initialising cursor at current playback position."""
+        if self._waveform_data is None:
+            return  # nothing to navigate
+        snapshot = self._audio_player.snapshot()
+        duration = snapshot.duration_seconds or 0.0
+        if duration > 0:
+            self._nav_cursor_fraction = max(0.0, min(1.0, snapshot.position_seconds / duration))
+        else:
+            self._nav_cursor_fraction = 0.0
+        self._waveform_nav_active = True
+        self._sync_nav_cursor()
+
+    def _exit_waveform_nav(self, *, seek: bool) -> None:
+        """Exit waveform nav mode, optionally seeking to the cursor position."""
+        if seek:
+            snapshot = self._audio_player.snapshot()
+            duration = snapshot.duration_seconds or 0.0
+            self._audio_player.seek(self._nav_cursor_fraction * duration)
+        self._waveform_nav_active = False
+        self._sync_nav_cursor()
+
+    def _waveform_nav_move(self, direction: str) -> None:
+        """Move the waveform nav cursor in *direction*."""
+        braille_cols = max(1, self._nav_display_width // 2)
+        fine = 1.0 / braille_cols
+        coarse = fine * 10
+        if direction == "fine_left":
+            self._nav_cursor_fraction = max(0.0, self._nav_cursor_fraction - fine)
+        elif direction == "fine_right":
+            self._nav_cursor_fraction = min(1.0, self._nav_cursor_fraction + fine)
+        elif direction == "coarse_left":
+            self._nav_cursor_fraction = max(0.0, self._nav_cursor_fraction - coarse)
+        elif direction == "coarse_right":
+            self._nav_cursor_fraction = min(1.0, self._nav_cursor_fraction + coarse)
+        elif direction == "home":
+            self._nav_cursor_fraction = 0.0
+        elif direction == "end":
+            self._nav_cursor_fraction = 1.0
+        self._sync_nav_cursor()
+
+    def _sync_nav_cursor(self) -> None:
+        """Push the current nav cursor (or None when inactive) to the top display."""
+        try:
+            top_display = self.query_one("#top-display", TopDisplayWidget)
+        except Exception:  # noqa: BLE001 - widget may not be mounted in unit tests
+            return
+        fraction = self._nav_cursor_fraction if self._waveform_nav_active else None
+        top_display.set_nav_cursor(fraction)
 
     # ── waveform ──────────────────────────────────────────────────────────
 
