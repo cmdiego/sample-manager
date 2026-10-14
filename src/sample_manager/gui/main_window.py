@@ -18,8 +18,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QSettings, QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QEvent, Qt, QSettings, QTimer, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import QLabel, QLineEdit, QMainWindow, QSplitter, QWidget
 
 from .controller import BrowserController
@@ -42,7 +42,7 @@ _TYPING_SENSITIVE_KEYS = frozenset(
     {
         "J", "K", "H", "L",
         "Down", "Up", "Left", "Right",
-        "Return", "Space", "A", "D", "/", "?",
+    "Return", "Space", "Ctrl+Space", "Escape", "A", "D", "/", "?",
     }
 )
 
@@ -128,7 +128,9 @@ class MainWindow(QMainWindow):
         )
         self._browser.open_externally_requested.connect(self._on_open_externally)
         self._selection.remove_requested.connect(self._controller.remove_from_selection)
+        self._selection.add_requested.connect(self._controller.add_to_selection)
         self._selection.detail_requested.connect(self._on_focus_changed)
+        self._browser.search_changed.connect(self._on_search_changed)
 
         self._controller.current_path_changed.connect(self._browser.set_breadcrumb)
         self._controller.current_path_changed.connect(self._on_path_changed)
@@ -206,6 +208,42 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.focusChanged.connect(self._on_app_focus_changed)
+            # A list with NoFocus does not take focus on mouse press. Watch the
+            # press itself so clicking a search result still exits typing mode.
+            app.installEventFilter(self)
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        """Handle search transport keys and click-away before widgets consume them."""
+        field = self._browser.filter_field
+        if self._active_dialog is None and obj is field and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Space:
+                if event.modifiers() == Qt.KeyboardModifier.NoModifier:
+                    self._toggle_playback()
+                    return True
+                if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                    self._resume_playback()
+                    return True
+            if event.key() == Qt.Key.Key_Escape:
+                self._on_escape()
+                return True
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._browser.focus_first()
+                field.clearFocus()
+                return True
+            if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+                self._browser.focus_first()
+                field.clearFocus()
+                return True
+        if (
+            self._active_dialog is None
+            and event.type() == QEvent.Type.MouseButtonPress
+            and field.hasFocus()
+            and obj is not field
+            and not (isinstance(obj, QWidget) and field.isAncestorOf(obj))
+        ):
+            # Leave results visible so a click can act on the row the user saw.
+            field.clearFocus()
+        return super().eventFilter(obj, event)
 
     def _on_app_focus_changed(self, _old, now) -> None:
         # While a dialog is open the shortcuts are suspended wholesale; don't let
@@ -217,10 +255,21 @@ class MainWindow(QMainWindow):
             if seq in _TYPING_SENSITIVE_KEYS:
                 shortcut.setEnabled(not typing)
 
+    def _on_search_changed(self, query: str) -> None:
+        """Refresh indexed results without auditioning every typed prefix."""
+        count = self._controller.search(query)
+        self._browser.set_search_feedback(query, count)
+        if not query.strip():
+            self._browser.focus_first()
+
     # -- focus → preview ------------------------------------------------------
 
     def _on_focus_changed(self, sample_id: int) -> None:
         if sample_id is None or sample_id < 0:
+            # A model reset during text entry clears the row selection. Keep
+            # the current preview and audition until the user chooses a hit.
+            if self._browser.filter_text().strip():
+                return
             self._preview.clear()
             self._controller.set_focus(None)
             return
@@ -231,7 +280,10 @@ class MainWindow(QMainWindow):
         self._controller.set_focus(sample_id)
 
     def _on_path_changed(self, _path) -> None:
-        # After a directory change, land focus on the first entry.
+        # A new directory starts ordinary browsing; stale search results should
+        # not replace its contents on the next key press.
+        if self._browser.filter_text():
+            self._browser.clear_filter()
         self._browser.focus_first()
 
     # -- status bar -----------------------------------------------------------
@@ -292,7 +344,7 @@ class MainWindow(QMainWindow):
             self._controller.remove_from_selection(sid)
 
     def _toggle_playback(self) -> None:
-        """``Space``: pause active playback or restart the focused sample."""
+        """``Space``: pause or resume, starting the focused sample if idle."""
         self._controller.toggle_focused_playback()
 
     def _resume_playback(self) -> None:
@@ -303,8 +355,8 @@ class MainWindow(QMainWindow):
         self._browser.focus_filter()
 
     def _on_escape(self) -> None:
-        # Priority 1: an active filter is cleared and focus returns to the list.
-        if self._browser.filter_text():
+        # Escape always exits search, including an empty focused search field.
+        if self._browser.filter_text() or self._browser.filter_has_focus():
             self._browser.clear_filter()
             self._browser.focus_list()
             return
@@ -314,8 +366,11 @@ class MainWindow(QMainWindow):
             self._active_dialog = None
 
     def _on_open_externally(self, path: str) -> None:
-        # Stub for Phase 3 — reveal-in-file-manager arrives later.
-        print(f"[open in file manager] {path}")
+        """Open a sample's parent folder (or a directory) in the file manager."""
+        target = Path(path)
+        folder = target if target.is_dir() else target.parent
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))):
+            self.show_status_error(f"Could not open folder: {folder}")
 
     # -- dialogs --------------------------------------------------------------
 
@@ -334,6 +389,11 @@ class MainWindow(QMainWindow):
     def _on_dialog_finished(self, _result: int) -> None:
         self._active_dialog = None
         self._set_all_shortcuts_enabled(True)
+        # A dialog may return focus to search without a fresh focusChanged
+        # signal, so restore the typing guard after re-enabling shortcuts.
+        from PySide6.QtWidgets import QApplication
+
+        self._on_app_focus_changed(None, QApplication.focusWidget())
 
     def _set_all_shortcuts_enabled(self, enabled: bool) -> None:
         for shortcut in self._shortcuts.values():
@@ -447,6 +507,13 @@ class MainWindow(QMainWindow):
         # Stop the poll timer and close the audio player (joining its worker
         # thread) before the window tears down, so nothing outlives it.
         self._error_clear_timer.stop()
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            # Each window registered an application-wide mouse/key filter.
+            # Remove it at close so a later window receives its own events once.
+            app.removeEventFilter(self)
         self._controller.shutdown()
         self._save_settings()
         super().closeEvent(event)

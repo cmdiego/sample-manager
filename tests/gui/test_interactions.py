@@ -206,13 +206,13 @@ def test_ctrl_p_opens_command_palette(populated_service, qtbot):
 # ---------------------------------------------------------------------------
 
 
-def test_filter_prefix_match(populated_service, qtbot):
+def test_search_substring_match(populated_service, qtbot):
     window, _service, root = _make_window(populated_service, qtbot)
     _enter_drums(window, qtbot, root)
     window.browser.filter_field.setText("sn")
     proxy = window.browser.proxy
     assert proxy.rowCount() == 1
-    assert _row_display(window, 0) == "snare.wav"
+    assert _row_display(window, 0) == "snare.wav — drums"
 
 
 def test_filter_is_case_insensitive(populated_service, qtbot):
@@ -220,7 +220,7 @@ def test_filter_is_case_insensitive(populated_service, qtbot):
     _enter_drums(window, qtbot, root)
     window.browser.filter_field.setText("SN")
     assert window.browser.proxy.rowCount() == 1
-    assert _row_display(window, 0) == "snare.wav"
+    assert _row_display(window, 0) == "snare.wav — drums"
 
 
 def test_escape_clears_filter_and_refocuses_list(populated_service, qtbot):
@@ -239,9 +239,9 @@ def test_filter_survives_navigation(populated_service, qtbot):
     window, _service, root = _make_window(populated_service, qtbot)
     _enter_drums(window, qtbot, root)
     window.browser.filter_field.setText("sn")
-    # Focus should land on the single visible match.
-    assert _focused_row(window) == 0
-    assert _row_display(window, 0) == "snare.wav"
+    # Search leaves the prior audition alone until a result is chosen.
+    assert _focused_row(window) == -1
+    assert _row_display(window, 0) == "snare.wav — drums"
 
 
 # ---------------------------------------------------------------------------

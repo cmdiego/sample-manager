@@ -103,6 +103,18 @@ class BrowserController(QObject):
         self._current_path = path
         self.current_path_changed.emit(path)
 
+    def search(self, query: str) -> int:
+        """Show root-wide search hits, or restore the current directory when cleared."""
+        if self._current_root is None or self._current_path is None:
+            return 0
+        items = (
+            self._service.search_samples(self._current_root, query)
+            if query.strip()
+            else self._service.list_directory(self._current_path)
+        )
+        self._browser_model.reset_with(items)
+        return len(items)
+
     def navigate_up(self) -> None:
         """Ascend to the parent directory, stopping at the current root."""
         if self._current_path is None:
@@ -130,6 +142,9 @@ class BrowserController(QObject):
 
     def add_to_selection(self, sample_id: int) -> None:
         """Add *sample_id* to the selection buffer (idempotent)."""
+        # A stale or forged drag payload must not trigger a foreign-key error.
+        if self._service.sample_details(sample_id) is None:
+            return
         self._service.add_to_selection(sample_id)
         self._refresh_after_selection()
 
@@ -169,7 +184,7 @@ class BrowserController(QObject):
             self._player.play(path)
 
     def toggle_focused_playback(self) -> None:
-        """Pause active playback, otherwise start the focused sample at zero."""
+        """Pause active playback, resume a pause, or start the focused sample."""
         if self._player is None:
             return
         from ..audio.player import PlaybackStatus
@@ -177,6 +192,9 @@ class BrowserController(QObject):
         snapshot = self._player.snapshot()
         if snapshot.status in (PlaybackStatus.PLAYING, PlaybackStatus.LOADING):
             self._player.pause()
+            return
+        if snapshot.status is PlaybackStatus.PAUSED and snapshot.path is not None:
+            self._player.play(snapshot.path)
             return
         if self._focused_sample_id is None:
             return

@@ -128,7 +128,8 @@ def test_space_pauses_active_playback(populated_service, qtbot):
     controller.shutdown()
 
 
-def test_space_after_pause_restarts_focused_from_start(populated_service, qtbot):
+def test_space_after_pause_resumes_current_file(populated_service, qtbot):
+    """Space restores the paused checkpoint even if search has moved focus."""
     service, root = populated_service
     player = FakePlayer()
     controller = BrowserController(service, player=player)
@@ -136,7 +137,8 @@ def test_space_after_pause_restarts_focused_from_start(populated_service, qtbot)
     controller.set_focus(sid)
     player.pause()
     controller.toggle_focused_playback()
-    assert len(player.restarted) == 1
+    assert len(player.played) == 2
+    assert player.restarted == []
     controller.shutdown()
 
 
