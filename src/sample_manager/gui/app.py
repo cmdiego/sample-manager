@@ -127,6 +127,11 @@ def run_gui(
     if simulation_temp:
         return _run_temporary_simulation(argv)
 
+    # A desktop launch should reach its Add Folder screen on a fresh install.
+    # Keep simulation-temp ahead of this call so test sessions never write to
+    # the user's config directory.
+    _ensure_gui_setup()
+
     # Open the DB via the shared CLI helper so config resolution matches the
     # rest of the app. Imported lazily to avoid a hard cli.py import at module
     # load time.
@@ -163,6 +168,23 @@ def _configured_default_root() -> Path | None:
 
     path = normalize_config(load_config(get_config_path())).get("default_library_root")
     return Path(path) if path else None
+
+
+def _ensure_gui_setup() -> bool:
+    """Create the same starter config and profiles as `sampleman init`.
+
+    A fresh desktop launch has no terminal setup step. Both helpers are
+    idempotent and leave existing config/profile content intact.
+
+    Returns:
+        True only when a new config was created on this launch.
+    """
+    from ..config import ensure_config_exists, load_config
+    from ..profiles import create_example_profiles, get_profiles_dir
+
+    config_path, created = ensure_config_exists()
+    create_example_profiles(get_profiles_dir(load_config(config_path)))
+    return created
 
 
 def _consume_simulation_flags(
