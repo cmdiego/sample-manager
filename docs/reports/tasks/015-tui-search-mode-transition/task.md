@@ -1,6 +1,6 @@
 # Task 015 — TUI Search Mode Transition
 
-- **Status**: In Progress
+- **Status**: Done
 - **Created**: 2026-10-14
 - **Owner**: Codex
 - **Origin**: Continued GUI/TUI usability audit
@@ -25,10 +25,10 @@
 ## 3. [Todo]
 
 - [x] Reproduce overlapping waveform and search modes with a mounted TUI.
-- [ ] Add a failing pilot regression.
-- [ ] Cancel waveform navigation when search starts.
-- [ ] Run focused and full-suite validation.
-- [ ] Record implementation and update tracker.
+- [x] Add a failing pilot regression.
+- [x] Cancel waveform navigation when search starts.
+- [x] Run focused and full-suite validation.
+- [x] Record implementation and update tracker.
 
 ## 4. [Implementation + Revert]
 
@@ -55,16 +55,21 @@
 
 ### Changed Files
 
-- Pending.
+- `src/sample_manager/tui/app.py` — cancel waveform navigation without seeking before search activates.
+- `tests/test_tui_navigation.py` — drive `w`, `/`, typing, and Right in a mounted Textual pilot; verify only browser navigation handles Right.
+- `docs/reports/tasks/README.md` — mark the task done.
 
 ### Behavior Implemented
 
-Pending.
+Entering typeahead search clears the waveform seek cursor and ends its arrow-key routing. Search then handles text and navigation keys normally; the transition never seeks audio.
 
 ### Validation
 
 - Baseline mounted TUI: `w`, `/`, `k`, Right left both search and waveform navigation active; Right moved the seek cursor.
+- Added pilot failed before the code change because waveform navigation remained active.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/test_tui_navigation.py tests/test_tui_waveform.py tests/test_tui_filter.py`: 38 passed.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/`: 881 passed, 10 deprecation warnings.
 
 ### Follow-ups / Risks
 
-- None identified yet.
+- No known behavioral risk; this PR is based on the branch for Task 014 until that PR merges.
