@@ -6,6 +6,7 @@ from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.widgets import Static
+from rich.markup import escape
 
 from ..nav_state import NavState, NavItem
 
@@ -34,7 +35,7 @@ class SampleListWidget(VerticalScroll):
         self.border_title = str(state.current_dir)
 
     def compose(self) -> ComposeResult:
-        yield Static("  (loading...)", id="tree-placeholder")
+        yield Static("  (loading...)")
 
     def update(self, state: NavState, *, empty_label: str = "empty directory") -> None:
         """Render the current rows with a truthful empty-state message."""
@@ -44,7 +45,9 @@ class SampleListWidget(VerticalScroll):
         self.remove_children()
 
         if not state.items:
-            self.mount(Static(f"  ({empty_label})", id="tree-placeholder"))
+            # Textual removes children asynchronously. A stable widget ID can
+            # collide with the old placeholder during quick empty refreshes.
+            self.mount(Static(f"  ({empty_label})"))
             self._prev_focused_index = -1
             return
 
@@ -74,12 +77,15 @@ FileTreeWidget = SampleListWidget
 
 
 def _format_item(item: NavItem, focused: bool = False) -> str:
+    # Filenames are user-controlled text; escape Rich markup so bracketed
+    # sample names render literally instead of becoming formatting tags.
+    name = escape(item.name)
     cursor = "▶" if focused else " "
     if item.is_dir:
-        text = f"{cursor} {item.name}/"
+        text = f"{cursor} {name}/"
         return f"[bold]{text}[/bold]" if focused else text
 
     check = "[green]✓[/green] " if item.is_selected else "  "
     indexed_tag = f" [dim]#{item.sample_id}[/dim]" if item.sample_id is not None else " [dim](not indexed)[/dim]"
-    text = f"{cursor} {check}{item.name}{indexed_tag}"
+    text = f"{cursor} {check}{name}{indexed_tag}"
     return f"[bold reverse]{text}[/bold reverse]" if focused else text

@@ -139,7 +139,7 @@ class LibraryBrowserService:
                 sample_id=item.sample_id,
                 is_selected=item.is_selected,
             )
-            for item in build_items(path, indexed, selection)
+            for item in build_items(path, indexed, selection, root=root.path if root else None)
         )
 
     def search_samples(self, root: LibraryRoot, query: str) -> tuple[BrowserItem, ...]:

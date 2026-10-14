@@ -74,6 +74,10 @@ class SampleManagerApp(App):
         self._data: TuiDataSource | None = None
         self._state: NavState | None = None
         self._indexed: dict[str, int] = {}
+        self._library_roots: tuple[Path, ...] = ()
+        self._active_pane = "browser"
+        self._stage_items: tuple[NavItem, ...] = ()
+        self._stage_focused_index = 0
         # Typeahead filter state
         self._filter_active: bool = False
         self._filter_query: str = ""
@@ -97,7 +101,7 @@ class SampleManagerApp(App):
             yield BrowserZone(_placeholder, id="browser-zone")
             yield SelectedFilesListWidget(id="selection-list")
         yield Static(
-            "  sampleman  ·  j/k move  ·  Return select  ·  l enter  ·  h back  ·  a add  ·  d remove  ·  / filter  ·  ? help  ·  q quit",
+            "  sampleman  ·  j/k move  ·  Tab pane  ·  r root  ·  Return select  ·  a add  ·  d remove  ·  / filter  ·  ? help  ·  q quit",
             id="status-bar",
         )
         yield Footer()
@@ -109,18 +113,34 @@ class SampleManagerApp(App):
         self.call_after_refresh(self._initialize)
 
     def _initialize(self) -> None:
+        """Open indexed roots and choose the configured default when present."""
         self._db = _open_db()
         if self._db is None:
-            self._set_status("  Config not found. Run `sampleman init`, then `sampleman config add-root <path>`.")
+            self._set_status("  Config not found. Run `sampleman init`, then `sampleman scan <path>`.")
             return
 
         self._data = TuiDataSource(self._db)
         roots = self._data.get_library_roots()
         if not roots:
-            self._set_status("  No library roots configured. Run `sampleman config add-root <path>`.")
+            self._set_status("  No indexed library roots. Run `sampleman scan <path>` or use GUI Add Folder.")
             return
 
-        root_path = Path(roots[0]["path"])
+        # Skip stale database roots so opening the TUI never crashes on a
+        # folder that has been moved or disconnected.
+        self._library_roots = tuple(
+            path for row in roots
+            if (path := Path(row["path"])).is_dir()
+        )
+        if not self._library_roots:
+            self._set_status("  Indexed library folders are unavailable. Reconnect a folder or scan a new one.")
+            return
+        configured = normalize_config(load_config(get_config_path())).get(
+            "default_library_root"
+        )
+        preferred = Path(configured) if configured else None
+        root_path = (
+            preferred if preferred in self._library_roots else self._library_roots[0]
+        )
         self._load_root(root_path)
 
     def on_unmount(self) -> None:
@@ -132,11 +152,26 @@ class SampleManagerApp(App):
     # ── data helpers ───────────────────────────────────────────────────────
 
     def _load_root(self, root_path: Path) -> None:
+        """Reset Browser navigation to a root while preserving the Stage."""
         self._indexed = self._data.get_indexed_files(root_path)
         selection_ids = self._data.get_selection_ids()
-        items = build_items(root_path, self._indexed, selection_ids)
-        self._state = NavState.initial(root_path, items, selection_ids=selection_ids)
+        items = build_items(root_path, self._indexed, selection_ids, root=root_path)
+        self._state = NavState.initial(
+            root_path, items, selection_ids=selection_ids,
+            library_roots=list(self._library_roots),
+        )
+        self._active_pane = "browser"
+        self._filter_active = False
+        self._filter_query = ""
+        self._filter_focused_index = 0
         self._refresh_ui()
+
+    def _next_library_root(self) -> None:
+        """Cycle to the next available indexed root with the r key."""
+        if self._state is None or len(self._library_roots) < 2:
+            return
+        index = self._library_roots.index(self._state.current_root)
+        self._load_root(self._library_roots[(index + 1) % len(self._library_roots)])
 
     def _visible_items(self) -> tuple[NavItem, ...]:
         """Return items filtered by the active typeahead query."""
@@ -151,6 +186,7 @@ class SampleManagerApp(App):
     # ── UI refresh ─────────────────────────────────────────────────────────
 
     def _refresh_ui(self) -> None:
+        """Reconcile Browser, Stage, preview, and status from current state."""
         if self._state is None:
             return
 
@@ -170,6 +206,7 @@ class SampleManagerApp(App):
         )
 
         browser: BrowserZone = self.query_one("#browser-zone", BrowserZone)
+        browser.set_class(self._active_pane == "browser", "active-pane")
         browser.sample_list.update(
             display_state,
             empty_label="no matches" if self._filter_query else "empty directory",
@@ -187,11 +224,29 @@ class SampleManagerApp(App):
         )
 
         # Selected files list
-        sel_items = [
-            row for sid in sorted(selection_ids)
+        selected_rows = [
+            (sid, row) for sid in sorted(selection_ids)
             if (row := self._data.get_sample_details(sid)) is not None
         ]
-        self.query_one("#selection-list", SelectedFilesListWidget).update(sel_items)
+        # Keep the visible Stage cursor and action target in the same order.
+        self._stage_items = tuple(
+            NavItem(
+                name=row.get("filename", "?"),
+                path=self._data.get_sample_path(sid) or Path(row.get("filename", "?")),
+                is_dir=False,
+                sample_id=sid,
+                is_selected=True,
+            )
+            for sid, row in selected_rows
+        )
+        self._stage_focused_index = min(
+            self._stage_focused_index, max(0, len(self._stage_items) - 1)
+        )
+        self.query_one("#selection-list", SelectedFilesListWidget).update(
+            [row for _sid, row in selected_rows],
+            focused_index=self._stage_focused_index,
+            active=self._active_pane == "stage",
+        )
 
         # Top display — update with focused item
         focused = self._effective_focused_item()
@@ -206,7 +261,7 @@ class SampleManagerApp(App):
     def _build_status(self) -> str:
         if self._state is None:
             return ""
-        item = self._state.focused_item
+        item = self._effective_focused_item()
         focused_name = item.name if item else "(empty)"
         sel_count = len(self._state.selection_ids)
         depth = len(self._state.dir_stack)
@@ -216,13 +271,20 @@ class SampleManagerApp(App):
         audio_hint = f"  |  audio:{playback.status.value}"
         if playback.error:
             audio_hint += f" ({playback.error})"
+        pane_hint = "Stage" if self._active_pane == "stage" else "Browser"
+        root_hint = (
+            f"{self._library_roots.index(self._state.current_root) + 1}/"
+            f"{len(self._library_roots)}"
+            if self._library_roots else "1/1"
+        )
         return (
             f"  {self._state.current_dir}"
             f"{filter_hint}"
+            f"  |  {pane_hint} · root {root_hint}"
             f"  |  {focused_name}"
             f"  |  sel:{sel_count}"
             f"{audio_hint}"
-            f"  |  j/k move · Space play/pause · Ctrl+Space resume · Return select · l enter · a add · d remove · / filter · ? help · q quit"
+            f"  |  j/k move · Tab pane · r root · Space play/pause · Return select · a add · d remove · / filter · ? help · q quit"
             f"{back_hint}"
         )
 
@@ -232,6 +294,7 @@ class SampleManagerApp(App):
     # ── key handling ───────────────────────────────────────────────────────
 
     def on_key(self, event) -> None:
+        """Route keys to the active pane, filter, playback, or modal action."""
         # Playback is global; filter mode must not consume transport keys.
         if event.key in ("space", "ctrl+space") and self._state is not None:
             event.stop()
@@ -284,7 +347,7 @@ class SampleManagerApp(App):
                 return
             # Arrows and Return navigate search results; letters remain text so
             # users can type names containing j, k, or l.
-            if event.key in ("up", "down", "left", "right", "enter"):
+            if event.key in ("up", "down", "left", "right", "enter", "tab"):
                 pass  # fall through to KEYMAP
             elif event.character and event.character.isprintable():
                 self._filter_query += event.character
@@ -313,13 +376,20 @@ class SampleManagerApp(App):
         if action == "quit":
             self.exit()
         elif action == "move_up":
-            if self._filter_query:
+            if self._active_pane == "stage":
+                self._stage_focused_index = max(0, self._stage_focused_index - 1)
+            elif self._filter_query:
                 self._filter_focused_index = max(0, self._filter_focused_index - 1)
             else:
                 self._state = self._state.move_up()
             self._refresh_ui()
         elif action == "move_down":
-            if self._filter_query:
+            if self._active_pane == "stage":
+                if self._stage_items:
+                    self._stage_focused_index = min(
+                        len(self._stage_items) - 1, self._stage_focused_index + 1
+                    )
+            elif self._filter_query:
                 self._filter_focused_index = min(
                     len(self._visible_items()) - 1, self._filter_focused_index + 1
                 )
@@ -327,7 +397,10 @@ class SampleManagerApp(App):
                 self._state = self._state.move_down()
             self._refresh_ui()
         elif action == "go_back":
-            self._handle_go_back()
+            if self._active_pane == "stage":
+                self._cycle_pane_focus()
+            else:
+                self._handle_go_back()
         elif action == "enter":
             self._handle_enter()
         elif action == "select_or_descend":
@@ -341,6 +414,8 @@ class SampleManagerApp(App):
         elif action == "cancel_or_back":
             if self._filter_active:
                 self._cancel_filter()
+            elif self._active_pane == "stage":
+                self._cycle_pane_focus()
             else:
                 self._handle_go_back()
         elif action == "show_help":
@@ -348,7 +423,9 @@ class SampleManagerApp(App):
         elif action == "command_palette":
             self.action_command_palette()
         elif action == "cycle_pane_focus":
-            pass  # future: tab between browser and selection list
+            self._cycle_pane_focus()
+        elif action == "next_library_root":
+            self._next_library_root()
         elif action == "toggle_playback":
             self._toggle_playback()
         elif action == "resume_playback":
@@ -358,6 +435,11 @@ class SampleManagerApp(App):
 
     def _effective_focused_item(self) -> NavItem | None:
         """Return the row actually highlighted in the filtered or directory view."""
+        if self._active_pane == "stage":
+            return (
+                self._stage_items[self._stage_focused_index]
+                if self._stage_items else None
+            )
         if self._filter_query:
             visible = self._visible_items()
             return visible[self._filter_focused_index] if visible else None
@@ -515,9 +597,21 @@ class SampleManagerApp(App):
 
     def _start_filter(self) -> None:
         """Start a fresh typeahead query in the current directory."""
+        self._active_pane = "browser"
         self._filter_active = True
         self._filter_query = ""
         self._filter_focused_index = 0
+        self._refresh_ui()
+
+    def _cycle_pane_focus(self) -> None:
+        """Move keyboard actions between Browser and the persistent Stage."""
+        self._active_pane = "stage" if self._active_pane == "browser" else "browser"
+        if self._active_pane == "stage":
+            # Search typing must stop when Tab leaves Browser, while the
+            # underlying directory cursor remains available on return.
+            self._filter_active = False
+            self._filter_query = ""
+            self._filter_focused_index = 0
         self._refresh_ui()
 
     def _cancel_filter(self) -> None:
@@ -538,7 +632,9 @@ class SampleManagerApp(App):
 
         if item.is_dir:
             selection_ids = self._data.get_selection_ids()
-            new_items = build_items(item.path, self._indexed, selection_ids)
+            new_items = build_items(
+                item.path, self._indexed, selection_ids, root=self._state.current_root
+            )
             self._state = self._state.enter_dir(item.path, new_items)
             self._cancel_filter()
         else:
@@ -559,9 +655,15 @@ class SampleManagerApp(App):
         if item is None:
             return
 
+        if self._active_pane == "stage":
+            self._remove_focused()
+            return
+
         if item.is_dir:
             selection_ids = self._data.get_selection_ids()
-            new_items = build_items(item.path, self._indexed, selection_ids)
+            new_items = build_items(
+                item.path, self._indexed, selection_ids, root=self._state.current_root
+            )
             self._state = self._state.enter_dir(item.path, new_items)
             self._cancel_filter()
         else:
@@ -582,12 +684,16 @@ class SampleManagerApp(App):
         parent_dir = self._state.dir_stack[-1]
         came_from = self._state.current_dir.name
         selection_ids = self._data.get_selection_ids()
-        parent_items = build_items(parent_dir, self._indexed, selection_ids)
+        parent_items = build_items(
+            parent_dir, self._indexed, selection_ids, root=self._state.current_root
+        )
         self._state = self._state.go_back(parent_items, restore_focus_name=came_from)
         self._refresh_ui()
 
     def _add_focused(self) -> None:
         """Add the currently visible row, including a non-first search hit."""
+        if self._active_pane == "stage":
+            return
         item = self._effective_focused_item()
         if item is None or item.sample_id is None:
             return

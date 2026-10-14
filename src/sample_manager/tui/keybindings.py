@@ -35,6 +35,7 @@ KEYMAP: dict[str, str] = {
     "escape": "cancel_or_back",
     # Pane focus cycling
     "tab": "cycle_pane_focus",
+    "r": "next_library_root",
     # Command palette
     "ctrl+p": "command_palette",
 }
@@ -62,7 +63,8 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "show_help": "Show this help overlay",
     "activate_filter": "Activate typeahead filter",
     "cancel_or_back": "Cancel filter / go back",
-    "cycle_pane_focus": "Cycle pane focus",
+    "cycle_pane_focus": "Switch Browser / Stage",
+    "next_library_root": "Switch to next library root",
     "command_palette": "Open command palette",
 }
 
@@ -82,7 +84,7 @@ ACTION_CATEGORIES: dict[str, list[str]] = {
         "waveform_nav_exit",
     ],
     "Filter": ["activate_filter", "cancel_or_back"],
-    "App": ["quit", "show_help", "cycle_pane_focus", "command_palette"],
+    "App": ["quit", "show_help", "cycle_pane_focus", "next_library_root", "command_palette"],
 }
 
 
