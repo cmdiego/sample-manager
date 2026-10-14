@@ -31,6 +31,7 @@ KEYMAP: dict[str, str] = {
     "q": "quit",
     "question_mark": "show_help",
     "f2": "show_settings",
+    "f4": "add_library",
     "f5": "rescan_library",
     # Filter / search
     "slash": "activate_filter",
@@ -65,6 +66,7 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "show_help": "Show this help overlay",
     "activate_filter": "Search library by name, path, or tag",
     "show_settings": "Audio output and auto-audition settings",
+    "add_library": "Add and index a sample folder",
     "rescan_library": "Rescan the active library in the background",
     "cancel_or_back": "Cancel filter / go back",
     "cycle_pane_focus": "Switch Browser / Stage",
@@ -88,7 +90,7 @@ ACTION_CATEGORIES: dict[str, list[str]] = {
         "waveform_nav_exit",
     ],
     "Filter": ["activate_filter", "cancel_or_back"],
-    "App": ["quit", "show_help", "show_settings", "rescan_library", "cycle_pane_focus", "next_library_root", "command_palette"],
+    "App": ["quit", "show_help", "show_settings", "add_library", "rescan_library", "cycle_pane_focus", "next_library_root", "command_palette"],
 }
 
 

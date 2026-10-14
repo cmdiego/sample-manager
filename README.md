@@ -40,7 +40,12 @@ The GUI creates the user config and example profiles automatically on first
 launch. Then choose **Add Folder…** in the Library toolbar to scan your first
 sample folder.
 
-For CLI or TUI setup, initialize those files explicitly:
+In the TUI, press **F4 Add Folder** to enter or paste a sample-folder path.
+Submitting a valid folder initializes missing config, profiles, and database
+files, scans in the background, and selects the new library. Cancel leaves
+configuration untouched.
+
+For CLI setup, initialize those files explicitly:
 
 ```bash
 sampleman init
@@ -109,6 +114,11 @@ available when switching roots. Press **F5** (or choose **Rescan Library** in th
 command palette) to pick up added, changed, or removed files. Scanning runs in
 the background and refreshes Browser, search results, and Stage when complete.
 The current folder and focused sample are preserved when they still exist.
+
+Use **F4 Add Folder** (also in the command palette) to index another library.
+Paths may include spaces, `~`, or environment variables. The chosen library is
+saved as the startup default after a successful scan; existing Stage items stay
+selected when adding or switching libraries.
 
 Press **F2** for **Settings**, or find Settings in the **Ctrl+P** command
 palette. Choose an audio output device or disable playback, and turn automatic
