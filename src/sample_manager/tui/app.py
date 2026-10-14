@@ -597,6 +597,10 @@ class SampleManagerApp(App):
 
     def _start_filter(self) -> None:
         """Start a fresh typeahead query in the current directory."""
+        # Search reuses Left/Right for browser navigation. End waveform mode
+        # without seeking so one key press never controls both interfaces.
+        if self._waveform_nav_active:
+            self._exit_waveform_nav(seek=False)
         self._active_pane = "browser"
         self._filter_active = True
         self._filter_query = ""
