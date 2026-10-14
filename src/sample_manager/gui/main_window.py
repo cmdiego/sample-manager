@@ -108,6 +108,8 @@ class MainWindow(QMainWindow):
 
         # -- zones ------------------------------------------------------------
         self._preview = PreviewWidget(waveform_service=waveform_service)
+        # The preview needs the same player used by keyboard playback actions.
+        self._preview.connect_player(self._controller.player)
         self._session = SessionSummaryWidget()
         self._browser = BrowserWidget()
         self._selection = SelectionWidget()
@@ -581,6 +583,9 @@ class MainWindow(QMainWindow):
             return
         player, warning = self._audio_player_factory(selection)
         self._controller.replace_player(player)
+        # The old player is closed by the controller; waveform clicks must now
+        # target the replacement (or do nothing when audio is disabled).
+        self._preview.connect_player(player)
         if warning:
             self.show_status_error(warning)
         elif getattr(selection, "device_index", None) is not None:

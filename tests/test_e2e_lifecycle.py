@@ -1,8 +1,7 @@
 """End-to-end lifecycle tests for the sampleman CLI.
 
 Tests the full application lifecycle from ``sampleman init`` through export
-and revert, using the real audio file in ``test_lib/Funky_Disco/`` as the
-fixture.
+and revert, using a valid WAV generated inside each test's temporary library.
 
 Every test runs in a hermetic environment:
   - Isolated HOME   -> ~ expansions resolve inside tmp_path, not real home
@@ -19,6 +18,7 @@ Isolation approach follows the pattern established in test_arrangement_cli.py:
 """
 
 import json
+import wave
 from pathlib import Path
 
 import pytest
@@ -33,13 +33,31 @@ from sample_manager.profiles import (
 )
 
 # ---------------------------------------------------------------------------
-# Fixture constants
+# Audio fixture
 # ---------------------------------------------------------------------------
 
-# Real audio fixture shipped with the repo. Contains one .wav file:
-#   Function_Loops_-_Funky_Disco_repack/loops/FL_FDS_Drum_Loops/
-#     FL_FDS_09_Drum_Loop_Full_98.wav
-FUNKY_DISCO_ROOT = Path(__file__).parent.parent / "test_lib" / "Funky_Disco"
+
+def _make_audio_fixture(tmp_path: Path) -> Path:
+    """Create the one drum-loop WAV used by scan, search, and export tests.
+
+    Generate it in the test directory so a fresh clone needs no ignored sample
+    pack and concurrent test runs cannot change each other's source file.
+    """
+    root = tmp_path / "test_lib" / "Funky_Disco"
+    audio_path = (
+        root
+        / "Function_Loops_-_Funky_Disco_repack"
+        / "loops"
+        / "FL_FDS_Drum_Loops"
+        / "FL_FDS_09_Drum_Loop_Full_98.wav"
+    )
+    audio_path.parent.mkdir(parents=True)
+    with wave.open(str(audio_path), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(8000)
+        audio.writeframes(b"\x00\x00" * 800)
+    return root
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +121,7 @@ def e2e_env(tmp_path, monkeypatch):
     - HOME env var redirected to tmp_path (so ~ expands here, not real home)
     - config_module.DEFAULT_CONFIG_DIR patched to tmp_path/.sample_manager
     - config_module.DEFAULT_CONFIG_PATH patched to the config.yaml inside it
+    - One valid drum-loop WAV below tmp_path/test_lib/Funky_Disco
     - A CliRunner ready to invoke the sampleman app
     - Convenience paths for the config dir, profiles dir, and export output
 
@@ -123,6 +142,7 @@ def e2e_env(tmp_path, monkeypatch):
     config_path = config_dir / "config.yaml"
     monkeypatch.setattr(config_module, "DEFAULT_CONFIG_DIR", config_dir)
     monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_path)
+    funky_disco = _make_audio_fixture(tmp_path)
 
     return {
         "runner": CliRunner(),
@@ -130,7 +150,7 @@ def e2e_env(tmp_path, monkeypatch):
         "config_dir": config_dir,
         "config_path": config_path,
         "profiles_dir": config_dir / "profiles",
-        "funky_disco": FUNKY_DISCO_ROOT,
+        "funky_disco": funky_disco,
         "export_dir": tmp_path / "exports",
     }
 
@@ -173,7 +193,7 @@ class TestE2EHappyPath:
 
         # ------------------------------------------------------------------
         # Phase 2 — sampleman config add-root
-        # Registers test_lib/Funky_Disco as a library root in config.yaml.
+        # Registers the generated Funky_Disco fixture as a library root.
         # ------------------------------------------------------------------
         result = runner.invoke(app, ["config", "add-root", str(funky_disco)])
         assert result.exit_code == 0, f"config add-root failed:\n{result.output}"
@@ -276,9 +296,9 @@ class TestE2EHappyPath:
         assert plan["export_profile_name"] == "default-export"
         assert plan["stats"]["operations"] == 1
         assert not plan["errors"], f"Plan has unexpected errors: {plan['errors']}"
-        # Source path must point at a real .wav inside test_lib/
+        # Source path must point at the generated WAV inside this test's root.
         assert plan["operations"][0]["src_abs_path"].endswith(".wav")
-        assert str(FUNKY_DISCO_ROOT.resolve()) in plan["operations"][0]["src_abs_path"]
+        assert str(funky_disco.resolve()) in plan["operations"][0]["src_abs_path"]
 
         # ------------------------------------------------------------------
         # Phase 9 — sampleman export (real file copy)

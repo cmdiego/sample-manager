@@ -6,6 +6,7 @@ constructed, so it is applied at import time.
 """
 
 import os
+import wave
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -40,8 +41,14 @@ def populated_service(browser_db, tmp_path):
     (root_dir / "drums").mkdir(parents=True)
     kick = root_dir / "drums" / "kick.wav"
     snare = root_dir / "drums" / "snare.wav"
-    kick.write_bytes(b"RIFF0000")
-    snare.write_bytes(b"RIFF1111")
+    # These files are also read by waveform workers in integration tests, so
+    # give the decoder real PCM data instead of an incomplete RIFF header.
+    for audio_path in (kick, snare):
+        with wave.open(str(audio_path), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(8000)
+            audio.writeframes(b"\x00\x00" * 800)
 
     browser_db.execute(
         "INSERT INTO library_root (path, path_norm) VALUES (?, ?)",
