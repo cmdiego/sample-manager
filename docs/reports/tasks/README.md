@@ -34,7 +34,7 @@ Reports created with the Codex `task` skill use this section order:
 | 012 — TUI Navigation and Stage Focus | ✅ Done | 2026-10-13 | [task.md](012-tui-navigation/task.md) | Make Tab and root cycling usable. |
 | 013 — GUI First-Run Setup | ✅ Done | 2026-10-13 | [task.md](013-gui-first-run/task.md) | Launch without prior CLI initialization. |
 | 014 — GUI Seek and Hermetic Lifecycle Fixture | ✅ Done | 2026-10-14 | [task.md](014-seek-and-e2e-fixture/task.md) | Waveform clicks seek; lifecycle tests use generated audio. |
-| 015 — TUI Search Mode Transition | In Progress | 2026-10-14 | [task.md](015-tui-search-mode-transition/task.md) | Prevent search and waveform navigation from overlapping. |
+| 015 — TUI Search Mode Transition | ✅ Done | 2026-10-14 | [task.md](015-tui-search-mode-transition/task.md) | Search cancels waveform navigation without seeking. |
 
 ## Maintenance Rules
 
