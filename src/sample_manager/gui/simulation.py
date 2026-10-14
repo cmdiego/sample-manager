@@ -194,7 +194,11 @@ class GuiSimulationRuntime:
         event = message["event"]
         if event == "key":
             key, modifiers = _parse_key_sequence(str(message.get("key", "")), context)
-            QTest.keyClick(self.window, key, modifiers)
+            # Physical keyboard input is delivered to the focused child. Send
+            # simulation keys there as well so Escape/Space in search exercise
+            # the same event filter as a real user session.
+            target = self.window.focusWidget() or self.window
+            QTest.keyClick(target, key, modifiers)
             return
         if event == "type_search":
             text = message.get("text")

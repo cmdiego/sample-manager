@@ -36,7 +36,11 @@ source .venv/bin/activate
 
 ## First Run
 
-Initialize the user config and example profiles:
+The GUI creates the user config and example profiles automatically on first
+launch. Then choose **Add Folder…** in the Library toolbar to scan your first
+sample folder.
+
+For CLI or TUI setup, initialize those files explicitly:
 
 ```bash
 sampleman init
@@ -54,6 +58,13 @@ source .venv/bin/activate
 sampleman        # launches the Qt GUI
 sampleman gui    # explicit — same as above
 ```
+
+Use the **Library** picker above the workspace to switch between indexed
+folders. **Add Folder…** chooses and scans a new sample folder; **Rescan** picks
+up newly added files and removes entries for files deleted from the active
+folder. The window stays responsive during a scan and shows the counts when it
+finishes. The selected folder becomes the default for the next launch and for
+CLI commands.
 
 For agent-driven or scripted GUI testing, launch the JSON simulation shell:
 
@@ -89,6 +100,13 @@ If you prefer the terminal, the legacy Textual TUI is still available:
 ```bash
 sampleman tui    # launches the legacy Textual terminal UI
 ```
+
+In the TUI, press **Tab** to switch between Browser and the selected-files
+Stage. **j/k** or the arrow keys move in the active pane; **Return** or **d**
+removes the highlighted Stage sample. Press **r** to cycle indexed library
+roots. The TUI opens the configured default root at startup, and Stage remains
+available when switching roots. Use the GUI's **Rescan** control or
+`sampleman scan` to pick up filesystem changes.
 
 All the non-interactive subcommands documented below continue to work
 regardless of which frontend you use.
@@ -185,8 +203,9 @@ sampleman scan /path/to/samples --rescan
 sampleman scan /path/to/samples --fast
 ```
 
-If a library was scanned before `.wave` support was added, scan that root again
-to index those files. The GUI searches indexed samples in the active library root.
+If a library was scanned before `.wave` support was added, use **Rescan** in the
+GUI or scan that root again from the CLI to index those files. The GUI searches
+indexed samples in the active library root.
 
 Check indexed library status:
 

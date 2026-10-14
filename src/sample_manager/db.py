@@ -43,6 +43,11 @@ class Db:
         self._path = str(db_path)
         self._conn: sqlite3.Connection | None = None
 
+    @property
+    def path(self) -> str:
+        """Return the connection target for independent worker connections."""
+        return self._path
+
     # -- lifecycle --
 
     def connect(self) -> sqlite3.Connection:

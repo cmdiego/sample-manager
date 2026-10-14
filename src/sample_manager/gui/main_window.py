@@ -16,11 +16,14 @@ signals; it holds no ``Db`` and issues no SQL.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
-from PySide6.QtCore import QEvent, Qt, QSettings, QTimer, QUrl
+from PySide6.QtCore import QEvent, QSignalBlocker, QThreadPool, Qt, QSettings, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
-from PySide6.QtWidgets import QLabel, QLineEdit, QMainWindow, QSplitter, QWidget
+from PySide6.QtWidgets import (
+    QComboBox, QFileDialog, QLabel, QLineEdit, QMainWindow, QSplitter,
+    QToolBar, QWidget,
+)
 
 from .controller import BrowserController
 from .dialogs import ActionDialog, CommandDialog, CommandPaletteDialog, HelpDialog, SettingsDialog
@@ -31,6 +34,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..audio.player import PlaybackSnapshot
     from ..audio.waveform import WaveformService
 from .shortcuts import install_shortcuts
+from .workers import Worker
 from .widgets.browser import BrowserWidget
 from .widgets.preview import PreviewWidget
 from .widgets.selection import SelectionWidget
@@ -58,11 +62,15 @@ class MainWindow(QMainWindow):
         controller: BrowserController,
         waveform_service: "WaveformService | None" = None,
         audio_player_factory=None,
+        preferred_root_path: Path | None = None,
+        on_library_selected: Callable[[Path], None] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._controller = controller
         self._audio_player_factory = audio_player_factory
+        self._on_library_selected = on_library_selected
+        self._scan_worker: Worker | None = None
         self._active_dialog = None
         self._command_interpreter = CommandInterpreter()
         self.setWindowTitle("Sample Manager")
@@ -76,6 +84,27 @@ class MainWindow(QMainWindow):
         self._settings_action.setMenuRole(QAction.MenuRole.PreferencesRole)
         self._settings_action.triggered.connect(self._show_settings)
         app_menu.addAction(self._settings_action)
+
+        # Keep library selection and indexing discoverable even when the
+        # current database has no roots yet.
+        library_toolbar = QToolBar("Libraries", self)
+        library_toolbar.setObjectName("LibraryToolbar")
+        library_toolbar.setMovable(False)
+        self.addToolBar(library_toolbar)
+        library_toolbar.addWidget(QLabel("Library: "))
+        self._root_picker = QComboBox(self)
+        self._root_picker.setObjectName("LibraryRootPicker")
+        self._root_picker.setMinimumContentsLength(24)
+        self._root_picker.currentIndexChanged.connect(self._on_root_picked)
+        library_toolbar.addWidget(self._root_picker)
+        self._add_library_action = QAction("Add Folder…", self)
+        self._add_library_action.setObjectName("AddLibraryAction")
+        self._add_library_action.triggered.connect(self._choose_library_folder)
+        library_toolbar.addAction(self._add_library_action)
+        self._rescan_action = QAction("Rescan", self)
+        self._rescan_action.setObjectName("RescanLibraryAction")
+        self._rescan_action.triggered.connect(self._rescan_current_library)
+        library_toolbar.addAction(self._rescan_action)
 
         # -- zones ------------------------------------------------------------
         self._preview = PreviewWidget(waveform_service=waveform_service)
@@ -188,10 +217,117 @@ class MainWindow(QMainWindow):
         # -- initial state ----------------------------------------------------
         self._session.set_summary(self._controller.selection_summary())
         roots = self._controller.library_roots()
-        if roots:
-            self._controller.load_root(roots[0])
+        preferred = next(
+            (root for root in roots if root.path == preferred_root_path), None
+        )
+        initial = preferred or (roots[0] if roots else None)
+        self._refresh_library_picker(initial.id if initial else None)
+        if initial is not None:
+            self._select_library(initial.id, persist=False)
+        else:
+            self.statusBar().showMessage(
+                "No indexed libraries yet. Choose Add Folder… to scan your samples."
+            )
 
         self._restore_settings()
+
+    # -- library roots and scanning ------------------------------------------
+
+    def _refresh_library_picker(self, selected_id: int | None = None) -> None:
+        """Rebuild the picker from indexed roots without triggering navigation."""
+        roots = self._controller.library_roots()
+        with QSignalBlocker(self._root_picker):
+            self._root_picker.clear()
+            for root in roots:
+                self._root_picker.addItem(str(root.path), root.id)
+            chosen = self._root_picker.findData(selected_id)
+            self._root_picker.setCurrentIndex(chosen if chosen >= 0 else (0 if roots else -1))
+        self._rescan_action.setEnabled(bool(roots) and self._scan_worker is None)
+
+    def _on_root_picked(self, index: int) -> None:
+        """Switch roots when the user chooses a different indexed library."""
+        if index >= 0:
+            self._select_library(int(self._root_picker.itemData(index)))
+
+    def _select_library(self, root_id: int, *, persist: bool = True) -> None:
+        """Load a real root and clear search results from the previous root."""
+        root = next((r for r in self._controller.library_roots() if r.id == root_id), None)
+        if root is None or not root.path.is_dir():
+            active = self._controller.current_root
+            if active is not None and active.id != root_id:
+                # The combo box has already moved; put its highlight back on
+                # the library the browser is still showing.
+                self._refresh_library_picker(active.id)
+            self.show_status_error("Library folder is missing; choose another folder")
+            return
+        self._browser.clear_filter()
+        self._controller.load_root(root)
+        if persist and self._on_library_selected is not None:
+            try:
+                self._on_library_selected(root.path)
+            except (OSError, ValueError) as exc:
+                self.show_status_error(f"Could not save library preference: {exc}")
+
+    def _choose_library_folder(self) -> None:
+        """Ask for a folder, then index it without holding up the Qt event loop."""
+        folder = QFileDialog.getExistingDirectory(
+            self, "Choose Sample Library", str(Path.home())
+        )
+        if folder:
+            self._start_scan(Path(folder))
+
+    def _rescan_current_library(self) -> None:
+        """Reconcile the active library with files currently on disk."""
+        root = self._controller.current_root
+        if root is not None:
+            self._start_scan(root.path)
+
+    def _start_scan(self, path: Path) -> None:
+        """Start one scanner job with an independent database connection."""
+        if self._scan_worker is not None:
+            return
+        if not path.is_dir():
+            self.show_status_error(f"Library folder is unavailable: {path}")
+            return
+        self._add_library_action.setEnabled(False)
+        self._rescan_action.setEnabled(False)
+        self._root_picker.setEnabled(False)
+        self.statusBar().showMessage(f"Scanning {path}…")
+        worker = Worker(self._controller.service.scan_directory, path)
+        worker.signals.result.connect(self._on_scan_result)
+        worker.signals.error.connect(self._on_scan_error)
+        worker.signals.finished.connect(self._on_scan_finished)
+        self._scan_worker = worker
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_scan_result(self, result) -> None:
+        """Refresh Qt models only after the worker commits its scanner result."""
+        current = self._controller.current_root
+        self._refresh_library_picker(result.library_root_id)
+        if current is not None and current.id == result.library_root_id:
+            self._controller.refresh_after_scan(self._browser.filter_text())
+            self._browser.set_search_feedback(
+                self._browser.filter_text(), self._controller.browser_model.rowCount()
+            )
+        else:
+            self._select_library(result.library_root_id)
+        self.statusBar().showMessage(
+            f"Scanned {result.total_on_disk} files: "
+            f"{result.inserted} new, {result.updated} updated, {result.pruned} removed",
+            10000,
+        )
+
+    def _on_scan_error(self, error: Exception) -> None:
+        """Keep the existing library usable after an indexing failure."""
+        self.statusBar().clearMessage()
+        self.show_status_error(f"Scan failed: {error}")
+
+    def _on_scan_finished(self) -> None:
+        """Restore controls after either a completed or failed scan."""
+        self._scan_worker = None
+        self._root_picker.setEnabled(True)
+        self._add_library_action.setEnabled(True)
+        self._rescan_action.setEnabled(self._controller.current_root is not None)
 
     # -- typing guard ---------------------------------------------------------
 

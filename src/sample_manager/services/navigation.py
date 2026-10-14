@@ -11,6 +11,8 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ..normalize import norm_rel_path
+
 
 @dataclass(frozen=True)
 class NavItem:
@@ -121,6 +123,8 @@ def build_items(
     directory: Path,
     indexed: dict[str, int],
     selection_ids: set[int],
+    *,
+    root: Path | None = None,
 ) -> list[NavItem]:
     """Build the NavItem list for a directory.
 
@@ -129,6 +133,8 @@ def build_items(
         indexed: Mapping of rel_path_norm -> sample_id for all indexed files
                  under the current library root. The caller pre-computes this.
         selection_ids: Set of currently selected sample IDs.
+        root: Known library root for direct indexed-key construction. Legacy
+            callers can omit it and use the suffix fallback.
 
     Returns:
         Sorted list: directories first (alphabetical), then files (alphabetical).
@@ -138,7 +144,7 @@ def build_items(
 
     try:
         entries = sorted(os.scandir(directory), key=lambda e: e.name.lower())
-    except PermissionError:
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
         return []
 
     for entry in entries:
@@ -148,8 +154,15 @@ def build_items(
         if entry.is_dir(follow_symlinks=False):
             dirs.append(NavItem(name=entry.name, path=path, is_dir=True, sample_id=None, is_selected=False))
         elif entry.is_file(follow_symlinks=False):
-            # Compute the rel_path_norm key used by the DB
-            rel_norm = _to_rel_norm(path, indexed)
+            # The root lets us compute one exact key per file. The previous
+            # suffix search walked every indexed sample for every visible row.
+            if root is not None:
+                try:
+                    rel_norm = norm_rel_path(path.relative_to(root))
+                except ValueError:
+                    rel_norm = _to_rel_norm(path, indexed)
+            else:
+                rel_norm = _to_rel_norm(path, indexed)
             sid = indexed.get(rel_norm)
             files.append(NavItem(
                 name=entry.name,
