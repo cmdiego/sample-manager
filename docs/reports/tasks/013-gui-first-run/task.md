@@ -67,7 +67,7 @@ The GUI can now open without `sampleman init`. It creates the default config and
 ### Validation
 
 - `QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q tests/gui/test_first_run.py`: 3 passed.
-- `QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q`: 874 passed, 10 Qt/audioread deprecation warnings.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q`: 879 passed after rebasing onto Task 012, 10 Qt/audioread deprecation warnings.
 - `git diff --check`: passed.
 
 ### Follow-ups / Risks
