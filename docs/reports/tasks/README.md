@@ -38,7 +38,7 @@ Reports created with the Codex `task` skill use this section order:
 | 016 — TUI Settings and Library Search | ✅ Done | 2026-10-14 | [task.md](016-tui-settings-search/task.md) | F2 settings, root-wide search, and modal keyboard fixes. |
 | 017 — TUI Library Rescan | ✅ Done | 2026-10-14 | [task.md](017-tui-library-rescan/task.md) | F5 scans in the background and refreshes Browser, search, and Stage. |
 | 018 — Add Libraries from the TUI | ✅ Done | 2026-10-14 | [task.md](018-tui-add-library/task.md) | F4 adds and indexes sample folders, including first run. |
-| 019 — TUI Sample Tags | In Progress | 2026-10-14 | [task.md](019-tui-sample-tags/task.md) | Edit sample tags from Browser/Stage and refresh tag search. |
+| 019 — TUI Sample Tags | ✅ Done | 2026-10-14 | [task.md](019-tui-sample-tags/task.md) | F6 tag editing, search refresh, and TUI lifecycle fixes. |
 
 ## Maintenance Rules
 

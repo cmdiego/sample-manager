@@ -1,6 +1,6 @@
 # Task 019 — TUI Sample Tags
 
-- **Status**: In Progress
+- **Status**: Done
 - **Created**: 2026-10-14
 - **Owner**: Codex
 - **Origin**: Continued TUI workflow improvement requested by the user
@@ -22,11 +22,11 @@
 
 ## 3. [Todo]
 
-- [ ] Implement a bounded tag-management modal and discovery.
-- [ ] Reuse tag service and expose real sample tags in Preview.
-- [ ] Keep editing attached to its original sample and refresh tag-search results.
-- [ ] Test aliases, idempotence, Stage subjects, empty input, and removal.
-- [ ] Validate and prepare a main-targeted PR with incremental commits.
+- [x] Implement a bounded tag-management modal and discovery.
+- [x] Reuse tag service and expose real sample tags in Preview.
+- [x] Keep editing attached to its original sample and refresh tag-search results.
+- [x] Test aliases, idempotence, Stage subjects, empty input, and removal.
+- [x] Validate and prepare a main-targeted PR with incremental commits.
 
 ## 4. [Implementation + Revert]
 
@@ -54,15 +54,27 @@
 
 ### Changed Files
 
-- Pending.
+- `tui/widgets/tags_screen.py` — immediate Add/Remove actions, alias/name input, current tag list, errors and Close/Escape.
+- `tui/data.py` — tag-service adapter, visible tags in sample metadata, hidden/empty-name guards, and handling a sample pruned between reads.
+- `tui/app.py` — F6/palette/keyboard action, captured sample subjects for file actions, active-query refresh, and safe polling/status updates during teardown.
+- Action pane, Preview, keybindings/help and README — tag discovery and literal rendering of user names.
+- `tests/test_tui_tags.py` — aliases, idempotence, removal scope, tag queries, Stage/captured subjects, hidden/empty/stale writes, and teardown/read races.
+- `tests/test_tui_add_library.py` — first-run Help and Quit regression.
 
 ### Behavior Implemented
 
-- Pending.
+- F6, t, Sample Tags in the palette, and Edit tags in the file action pane manage a captured sample's visible tags. Existing aliases resolve consistently with the CLI. Preview and active tag queries update immediately without auditioning.
+- Hidden tags remain hidden; removal detaches only from this sample. Names with spaces, commas and brackets remain literal.
+- Fixed a reproduced audio polling callback after child widgets had unmounted. The timer is stopped during teardown and late view updates are ignored.
+- A final first-run pilot reproduced Help and Quit being ignored before a root exists. Application commands now work before sample-navigation state is loaded.
 
 ### Validation
 
-- Pending.
+- Tag-input tests: 4 passed; teardown/read-race plus search tests: 8 passed.
+- First-run Help/Quit test failed before the routing fix, then passed with the navigation/search group (10 tests).
+- Inspected a rendered Textual screenshot of the tag editor at 80×24, including literal bracketed tag names and visible action buttons.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/`: 904 passed, 10 existing deprecation warnings.
+- `git diff --check origin/main`: passed.
 
 ### Follow-ups / Risks
 
