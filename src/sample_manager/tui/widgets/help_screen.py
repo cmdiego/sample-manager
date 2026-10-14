@@ -77,6 +77,14 @@ class HelpScreen(ModalScreen):
                 "    Press l or → to open the action pane for a focused file.",
                 classes="help-row",
             )
+            yield Static(
+                "    Tab switches Browser/Stage; arrows move, Return or d removes in Stage.",
+                classes="help-row",
+            )
+            yield Static(
+                "    Press r to cycle indexed library roots.",
+                classes="help-row",
+            )
             yield Static("", classes="help-spacer")
             yield Static(
                 "  Press  ?  /  Escape  /  q  to close",

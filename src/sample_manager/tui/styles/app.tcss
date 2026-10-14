@@ -66,6 +66,10 @@ BrowserZone {
     layout: vertical;
 }
 
+BrowserZone.active-pane {
+    border: heavy $warning;
+}
+
 /* ── Zone 3a: Filters Panel (red border, fixed strip) ─────── */
 
 FiltersPanel {
@@ -115,6 +119,10 @@ SelectedFilesListWidget .sel-item {
 SelectedFilesListWidget .sel-hint {
     height: 1;
     color: $text-muted;
+}
+
+SelectedFilesListWidget.active-pane {
+    border: heavy $accent;
 }
 
 /* ── Status bar (docked bottom, 1 line) ───────────────────── */

@@ -43,6 +43,10 @@ class TuiDataSource:
     def get_sample_details(self, sample_id: int) -> dict | None:
         return self._service.sample_details_row(sample_id)
 
+    def get_sample_path(self, sample_id: int) -> Path | None:
+        """Resolve a staged sample so pane focus can audition it."""
+        return self._service.sample_path(sample_id)
+
     def get_selection_total_size(self) -> int:
         """Return total size_bytes for all selected samples (0 if none or column missing)."""
         return self._service.selection_total_size()

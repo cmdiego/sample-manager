@@ -224,6 +224,10 @@ class MainWindow(QMainWindow):
         self._refresh_library_picker(initial.id if initial else None)
         if initial is not None:
             self._select_library(initial.id, persist=False)
+        else:
+            self.statusBar().showMessage(
+                "No indexed libraries yet. Choose Add Folder… to scan your samples."
+            )
 
         self._restore_settings()
 
