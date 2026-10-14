@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Callable
 
 from PySide6.QtWidgets import QApplication
 
@@ -51,6 +52,8 @@ def create_main_window(
     player=None,
     waveform_service=None,
     audio_player_factory=None,
+    preferred_root_path: Path | None = None,
+    on_library_selected: Callable[[Path], None] | None = None,
 ) -> MainWindow:
     """Wire a controller + main window on top of a browser service."""
     controller = BrowserController(service, player=player)
@@ -58,7 +61,20 @@ def create_main_window(
         controller,
         waveform_service=waveform_service,
         audio_player_factory=audio_player_factory,
+        preferred_root_path=preferred_root_path,
+        on_library_selected=on_library_selected,
     )
+
+
+def _record_selected_root(path: Path) -> None:
+    """Keep GUI library choices aligned with the CLI's configured default."""
+    from ..config import add_library_root, get_config_path, load_config, save_config
+
+    config_path = get_config_path()
+    config, _message = add_library_root(
+        load_config(config_path), str(path), set_as_default=True
+    )
+    save_config(config, config_path)
 
 
 def _build_player(selection: AudioOutputSelection | AudioOutputMode):
@@ -126,6 +142,8 @@ def run_gui(
             player=player,
             waveform_service=waveform_service,
             audio_player_factory=_build_player,
+            preferred_root_path=_configured_default_root(),
+            on_library_selected=_record_selected_root,
         )
         if warning:
             window.show_status_error(warning)
@@ -137,6 +155,14 @@ def run_gui(
         return app.exec()
     finally:
         db.close()
+
+
+def _configured_default_root() -> Path | None:
+    """Read the configured startup root after the shared DB setup succeeds."""
+    from ..config import get_config_path, load_config, normalize_config
+
+    path = normalize_config(load_config(get_config_path())).get("default_library_root")
+    return Path(path) if path else None
 
 
 def _consume_simulation_flags(

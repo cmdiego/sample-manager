@@ -18,6 +18,7 @@ from ..db import Db
 from ..repos.library_root_repo import LibraryRootRepo
 from ..repos.sample_repo import SampleRepo
 from ..repos.selection_repo import SelectionRepo
+from ..scanner import ScanResult, scan_library
 from .navigation import build_items
 
 
@@ -109,6 +110,16 @@ class LibraryBrowserService:
             LibraryRoot(id=row["id"], path=Path(row["path"]), path_norm=row["path_norm"])
             for row in self._root_repo.list_all()
         )
+
+    def scan_directory(self, path: Path) -> ScanResult:
+        """Index a folder on a separate SQLite connection for background jobs.
+
+        The GUI's service connection belongs to the main thread. A scan can
+        take seconds, so a worker must own its own connection instead of
+        sharing that SQLite object across Qt threads.
+        """
+        with Db(self._db.path) as worker_db:
+            return scan_library(worker_db, path, rescan=True, fast=True)
 
     def list_directory(self, path: Path) -> tuple[BrowserItem, ...]:
         """List a directory as ordered, selection-aware browser items.

@@ -115,6 +115,19 @@ class BrowserController(QObject):
         self._browser_model.reset_with(items)
         return len(items)
 
+    def refresh_after_scan(self, query: str = "") -> None:
+        """Reload indexed rows and Stage after a scan changes the database."""
+        if self._current_root is None or self._current_path is None:
+            return
+        # A rescan can remove the directory the user was viewing. Fall back
+        # to the root before building rows from the filesystem again.
+        if not self._current_path.is_dir():
+            self._current_path = self._current_root.path
+            self.current_path_changed.emit(self._current_path)
+        self.search(query)
+        self._selection_model.reset_from_service()
+        self.selection_changed.emit(self._service.selection_summary())
+
     def navigate_up(self) -> None:
         """Ascend to the parent directory, stopping at the current root."""
         if self._current_path is None:
