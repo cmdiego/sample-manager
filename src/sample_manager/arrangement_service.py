@@ -42,14 +42,36 @@ def build_plan(
     arrangement_profile: ArrangementProfile,
     export_profile: ExportProfile,
     mode_hint: str = "copy",
+    folder_paths: dict[int, str] | None = None,
 ) -> dict:
-    """Build deterministic export plan for an arrangement."""
+    """Build deterministic export plan for an arrangement.
+
+    Args:
+        arrangement: Arrangement dict
+        samples: List of sample dicts (must include 'folder_id' if using virtual folders)
+        arrangement_profile: Arrangement profile with naming template
+        export_profile: Export constraints and policies
+        mode_hint: Operation mode hint (copy/symlink/move)
+        folder_paths: Optional mapping of sample_id -> virtual folder path
+
+    Returns:
+        Plan dict with operations, warnings, errors, stats
+    """
     ordered = sorted(samples, key=lambda s: (s["id"], s["rel_path"]))
     ops = []
     collisions: dict[str, list[dict]] = {}
 
     for i, s in enumerate(ordered, start=1):
         dst_rel_path = _render_template(arrangement_profile.naming_template, s, i)
+
+        # Prepend virtual folder path if present
+        if folder_paths and s["id"] in folder_paths:
+            folder_path = folder_paths[s["id"]]
+            if folder_path:
+                # Normalize and combine paths
+                dst_rel_path = str(Path(folder_path) / dst_rel_path)
+                dst_rel_path = _MULTISLASH.sub("/", dst_rel_path.strip().strip("/"))
+
         ops.append(
             {
                 "sample_id": int(s["id"]),

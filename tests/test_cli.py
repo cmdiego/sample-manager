@@ -41,6 +41,78 @@ def test_init_idempotent(tmp_home, monkeypatch, runner):
     assert "already exists" in result2.stdout
 
 
+def test_default_simulation_option_launches_simulation_shell(monkeypatch, runner):
+    """The app-level --simulation option is passed to the default GUI launch."""
+    from sample_manager.gui import app as gui_app
+
+    calls = []
+
+    def fake_run_gui(*args, **kwargs):
+        calls.append(kwargs)
+        return 17
+
+    monkeypatch.setattr(gui_app, "run_gui", fake_run_gui)
+
+    result = runner.invoke(app, ["--simulation"])
+
+    assert result.exit_code == 17
+    assert calls == [{"simulation": True, "simulation_temp": False}]
+
+
+def test_gui_command_simulation_option_launches_simulation_shell(monkeypatch, runner):
+    """The explicit gui command also supports --simulation."""
+    from sample_manager.gui import app as gui_app
+
+    calls = []
+
+    def fake_run_gui(*args, **kwargs):
+        calls.append(kwargs)
+        return 17
+
+    monkeypatch.setattr(gui_app, "run_gui", fake_run_gui)
+
+    result = runner.invoke(app, ["gui", "--simulation"])
+
+    assert result.exit_code == 17
+    assert calls == [{"simulation": True, "simulation_temp": False}]
+
+
+def test_default_simulation_temp_option_launches_disposable_shell(monkeypatch, runner):
+    """The app-level --simulation-temp option implies simulation mode."""
+    from sample_manager.gui import app as gui_app
+
+    calls = []
+
+    def fake_run_gui(*args, **kwargs):
+        calls.append(kwargs)
+        return 17
+
+    monkeypatch.setattr(gui_app, "run_gui", fake_run_gui)
+
+    result = runner.invoke(app, ["--simulation-temp"])
+
+    assert result.exit_code == 17
+    assert calls == [{"simulation": False, "simulation_temp": True}]
+
+
+def test_gui_command_simulation_temp_option_launches_disposable_shell(monkeypatch, runner):
+    """The explicit gui command supports the disposable simulation shell."""
+    from sample_manager.gui import app as gui_app
+
+    calls = []
+
+    def fake_run_gui(*args, **kwargs):
+        calls.append(kwargs)
+        return 17
+
+    monkeypatch.setattr(gui_app, "run_gui", fake_run_gui)
+
+    result = runner.invoke(app, ["gui", "--simulation-temp"])
+
+    assert result.exit_code == 17
+    assert calls == [{"simulation": False, "simulation_temp": True}]
+
+
 def test_config_show_human_output(tmp_home, monkeypatch, runner):
     """Test config show command (human output)."""
     config_path = tmp_home / ".sample_manager" / "config.yaml"

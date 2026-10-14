@@ -1,0 +1,165 @@
+/* Sample Manager TUI — main stylesheet */
+
+Screen {
+    layers: base overlay;
+}
+
+/* ── 4-zone grid ───────────────────────────────────────────── */
+
+#main-grid {
+    layout: grid;
+    grid-size: 2 2;
+    grid-columns: 3fr 1fr;
+    grid-rows: 2fr 3fr;
+    height: 1fr;
+}
+
+/* ── Zone 1: Top Display (white border, top-left) ─────────── */
+
+TopDisplayWidget {
+    border: solid white;
+    border-title-align: left;
+    height: 1fr;
+    padding: 0 1;
+    overflow: hidden scroll;
+}
+
+TopDisplayWidget .meta-row {
+    height: 1;
+    color: $text;
+}
+
+TopDisplayWidget .meta-label {
+    color: $text-muted;
+}
+
+TopDisplayWidget .waveform-display {
+    height: 5;
+    width: 1fr;
+    color: $success;
+}
+
+/* ── Zone 2: Session Summary (blue border, top-right) ─────── */
+
+SessionSummaryWidget {
+    border: solid $primary;
+    border-title-align: left;
+    height: 1fr;
+    padding: 1 2;
+}
+
+SessionSummaryWidget .summary-row {
+    height: 1;
+    color: $text;
+}
+
+SessionSummaryWidget .summary-label {
+    color: $text-muted;
+}
+
+/* ── Zone 3: Browser Zone (orange border, bottom-left) ────── */
+
+BrowserZone {
+    border: solid $warning;
+    border-title-align: left;
+    height: 1fr;
+    layout: vertical;
+}
+
+/* ── Zone 3a: Filters Panel (red border, fixed strip) ─────── */
+
+FiltersPanel {
+    border: solid $error;
+    border-title-align: left;
+    height: 3;
+    padding: 0 1;
+}
+
+FiltersPanel .filter-text {
+    height: 1;
+    color: $warning;
+}
+
+FiltersPanel .filter-empty {
+    height: 1;
+    color: $text-muted;
+}
+
+/* ── Zone 3b: Sample List (green border, fills rest) ──────── */
+
+SampleListWidget {
+    border: solid $success;
+    border-title-align: left;
+    height: 1fr;
+    padding: 0 1;
+}
+
+SampleListWidget .file-row {
+    height: 1;
+}
+
+/* ── Zone 4: Selected Files List (purple border, bottom-right) */
+
+SelectedFilesListWidget {
+    border: solid $accent;
+    border-title-align: left;
+    height: 1fr;
+    padding: 0 1;
+}
+
+SelectedFilesListWidget .sel-item {
+    height: 1;
+    color: $success;
+}
+
+SelectedFilesListWidget .sel-hint {
+    height: 1;
+    color: $text-muted;
+}
+
+/* ── Status bar (docked bottom, 1 line) ───────────────────── */
+
+#status-bar {
+    dock: bottom;
+    height: 1;
+    background: $accent-darken-2;
+    color: $text;
+    padding: 0 1;
+}
+
+/* ── HelpScreen modal ──────────────────────────────────────── */
+
+HelpScreen {
+    align: center middle;
+}
+
+HelpScreen .help-container {
+    width: 64;
+    height: auto;
+    border: double $accent;
+    padding: 1 2;
+    background: $surface;
+}
+
+HelpScreen .help-title {
+    text-style: bold;
+    color: $warning;
+}
+
+HelpScreen .help-category {
+    text-style: bold;
+    color: $text;
+}
+
+HelpScreen .help-row {
+    color: $text-muted;
+}
+
+HelpScreen .help-spacer {
+    height: 1;
+}
+
+HelpScreen .help-hint {
+    color: $text-muted;
+    text-style: italic;
+}

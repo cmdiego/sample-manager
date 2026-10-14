@@ -1,0 +1,86 @@
+{
+  "name": "movement-vim-keys",
+  "steps": [
+    {
+      "assert": "path",
+      "relative": "."
+    },
+    {
+      "assert": "visible_rows",
+      "names": [
+        "drums"
+      ]
+    },
+    {
+      "assert": "focus",
+      "row": 0,
+      "name": "drums",
+      "is_dir": true
+    },
+    {
+      "event": "key",
+      "key": "L"
+    },
+    {
+      "assert": "path",
+      "relative": "drums"
+    },
+    {
+      "assert": "visible_rows",
+      "names": [
+        "kick.wav",
+        "snare.wav"
+      ]
+    },
+    {
+      "assert": "focus",
+      "row": 0,
+      "name": "kick.wav",
+      "is_dir": false
+    },
+    {
+      "event": "key",
+      "key": "J"
+    },
+    {
+      "assert": "focus",
+      "row": 1,
+      "name": "snare.wav",
+      "is_dir": false
+    },
+    {
+      "event": "key",
+      "key": "J"
+    },
+    {
+      "assert": "focus",
+      "row": 1,
+      "name": "snare.wav",
+      "is_dir": false
+    },
+    {
+      "event": "key",
+      "key": "K"
+    },
+    {
+      "assert": "focus",
+      "row": 0,
+      "name": "kick.wav",
+      "is_dir": false
+    },
+    {
+      "event": "key",
+      "key": "H"
+    },
+    {
+      "assert": "path",
+      "relative": "."
+    },
+    {
+      "assert": "focus",
+      "row": 0,
+      "name": "drums",
+      "is_dir": true
+    }
+  ]
+}

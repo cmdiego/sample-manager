@@ -52,6 +52,43 @@ def cli_runner():
 
 
 @pytest.fixture
+def write_sine_wav():
+    """Return a helper that writes a PCM sine-tone WAV using only the stdlib.
+
+    Dependency-free (no numpy/soundfile needed to *generate* fixtures), keeping
+    the audio test suite hermetic. Returns the written Path.
+    """
+    import math
+    import struct
+    import wave
+
+    def _write(
+        path,
+        *,
+        freq=440.0,
+        sample_rate=44100,
+        seconds=0.1,
+        amplitude=0.5,
+        channels=1,
+    ):
+        path = Path(path)
+        n = int(sample_rate * seconds)
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(channels)
+            w.setsampwidth(2)  # 16-bit
+            w.setframerate(sample_rate)
+            frames = bytearray()
+            for i in range(n):
+                val = int(amplitude * 32767 * math.sin(2 * math.pi * freq * i / sample_rate))
+                for _ in range(channels):
+                    frames += struct.pack("<h", val)
+            w.writeframes(bytes(frames))
+        return path
+
+    return _write
+
+
+@pytest.fixture
 def db(tmp_path):
     """Fresh SQLite DB with Phase 2 schema applied (Migration 0001).
 

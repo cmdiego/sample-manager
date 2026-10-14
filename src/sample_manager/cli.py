@@ -18,10 +18,36 @@ from .migrations import apply_migrations
 
 # Main app
 app = typer.Typer(
-    name="sample",
+    name="sampleman",
     help="Sample Manager - Music sample library management CLI",
-    no_args_is_help=True
+    no_args_is_help=False,
+    invoke_without_command=True,
 )
+
+
+@app.callback()
+def _main(
+    ctx: typer.Context,
+    simulation: bool = typer.Option(
+        False,
+        "--simulation",
+        help="Launch the Qt GUI in JSON simulation shell mode.",
+    ),
+    simulation_temp: bool = typer.Option(
+        False,
+        "--simulation-temp",
+        help="Launch the JSON simulation shell with a disposable sample library.",
+    ),
+) -> None:
+    """Launch the Qt desktop GUI when no subcommand is given.
+
+    Use `sampleman tui` for the legacy Textual terminal UI.
+    """
+    if ctx.invoked_subcommand is None:
+        from .gui.app import run_gui
+        raise typer.Exit(
+            run_gui(simulation=simulation, simulation_temp=simulation_temp)
+        )
 
 # Config subcommand group
 config_app = typer.Typer(
@@ -96,7 +122,7 @@ def init():
         if created:
             typer.echo(f"✓ Created config directory and file: {config_path}")
             typer.echo(f"  Edit with: {config_path}")
-            typer.echo(f"  Add library roots with: sample config add-root <path>")
+            typer.echo(f"  Add library roots with: sampleman config add-root <path>")
         else:
             typer.echo(f"✓ Config already exists: {config_path}")
 
@@ -124,7 +150,7 @@ def _get_db() -> Db:
     if not config_path.exists():
         typer.echo(
             f"Config not found: {config_path}\n"
-            f"Run 'sample init' to create it.",
+            f"Run 'sampleman init' to create it.",
             err=True,
         )
         raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
@@ -140,6 +166,33 @@ def _get_db() -> Db:
     db.connect()
     apply_migrations(db)
     return db
+
+
+@app.command("gui")
+def gui_cmd(
+    simulation: bool = typer.Option(
+        False,
+        "--simulation",
+        help="Launch the Qt GUI in JSON simulation shell mode.",
+    ),
+    simulation_temp: bool = typer.Option(
+        False,
+        "--simulation-temp",
+        help="Launch the JSON simulation shell with a disposable sample library.",
+    ),
+):
+    """Launch the Qt desktop GUI (the default when no subcommand is given)."""
+    from .gui.app import run_gui
+
+    sys.exit(run_gui(simulation=simulation, simulation_temp=simulation_temp))
+
+
+@app.command("tui")
+def tui_cmd():
+    """Launch the legacy Textual terminal UI."""
+    from .tui.app import SampleManagerApp
+
+    SampleManagerApp().run()
 
 
 @app.command()
@@ -348,7 +401,7 @@ def config_show(
     if not config_path.exists():
         typer.echo(
             f"Config not found: {config_path}\n"
-            f"Run 'sample init' to create it.",
+            f"Run 'sampleman init' to create it.",
             err=True
         )
         raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
@@ -399,7 +452,7 @@ def config_validate(
     if not config_path.exists():
         typer.echo(
             f"Config not found: {config_path}\n"
-            f"Run 'sample init' to create it.",
+            f"Run 'sampleman init' to create it.",
             err=True
         )
         raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
@@ -454,18 +507,18 @@ def config_set(
     
     Examples:
     
-      sample config set db_path ~/.sample_manager/db.sqlite3
-      
-      sample config set defaults.export_mode symlink
-      
-      sample config set defaults.confirmations false
+      sampleman config set db_path ~/.sample_manager/db.sqlite3
+
+      sampleman config set defaults.export_mode symlink
+
+      sampleman config set defaults.confirmations false
     """
     config_path = config_module.get_config_path()
     
     if not config_path.exists():
         typer.echo(
             f"Config not found: {config_path}\n"
-            f"Run 'sample init' to create it.",
+            f"Run 'sampleman init' to create it.",
             err=True
         )
         raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
@@ -509,7 +562,7 @@ def config_add_root(
     if not config_path.exists():
         typer.echo(
             f"Config not found: {config_path}\n"
-            f"Run 'sample init' to create it.",
+            f"Run 'sampleman init' to create it.",
             err=True
         )
         raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
@@ -541,7 +594,7 @@ def config_remove_root(
     if not config_path.exists():
         typer.echo(
             f"Config not found: {config_path}\n"
-            f"Run 'sample init' to create it.",
+            f"Run 'sampleman init' to create it.",
             err=True
         )
         raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
@@ -575,7 +628,7 @@ def config_set_default(
     if not config_path.exists():
         typer.echo(
             f"Config not found: {config_path}\n"
-            f"Run 'sample init' to create it.",
+            f"Run 'sampleman init' to create it.",
             err=True
         )
         raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
@@ -609,7 +662,7 @@ def _get_profiles_dir() -> Path:
     if not config_path.exists():
         typer.echo(
             f"Config not found: {config_path}\n"
-            f"Run 'sample init' to create it.",
+            f"Run 'sampleman init' to create it.",
             err=True,
         )
         raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)

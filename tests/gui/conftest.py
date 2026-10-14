@@ -1,0 +1,71 @@
+"""Fixtures for the offscreen Qt GUI test suite.
+
+Forces the ``offscreen`` Qt platform plugin so the tests run headless in CI and
+locally without a display server. This must be set before ``QApplication`` is
+constructed, so it is applied at import time.
+"""
+
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from pathlib import Path
+
+import pytest
+
+from sample_manager.db import Db
+from sample_manager.migrations import apply_migrations
+from sample_manager.services.library_browser import LibraryBrowserService
+
+
+@pytest.fixture
+def browser_db():
+    """In-memory DB with all migrations applied."""
+    db = Db(":memory:")
+    db.connect()
+    apply_migrations(db)
+    yield db
+    db.close()
+
+
+@pytest.fixture
+def populated_service(browser_db, tmp_path):
+    """A LibraryBrowserService with a library root, some files, and samples.
+
+    Creates a real directory tree so ``list_directory`` (which scandirs the
+    filesystem) returns items, and inserts matching ``sample`` rows so files
+    are enriched with sample ids.
+    """
+    root_dir = tmp_path / "library"
+    (root_dir / "drums").mkdir(parents=True)
+    kick = root_dir / "drums" / "kick.wav"
+    snare = root_dir / "drums" / "snare.wav"
+    kick.write_bytes(b"RIFF0000")
+    snare.write_bytes(b"RIFF1111")
+
+    browser_db.execute(
+        "INSERT INTO library_root (path, path_norm) VALUES (?, ?)",
+        (str(root_dir), str(root_dir).lower()),
+    )
+    root_id = browser_db.fetchval("SELECT id FROM library_root LIMIT 1")
+
+    for f in (kick, snare):
+        rel = f.relative_to(root_dir)
+        browser_db.execute(
+            "INSERT INTO sample "
+            "(library_root_id, rel_path, rel_path_norm, filename, ext, size_bytes, mtime_epoch) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                root_id,
+                str(rel),
+                str(rel).lower(),
+                f.name,
+                "wav",
+                f.stat().st_size,
+                0,
+            ),
+        )
+    browser_db.conn.commit()
+
+    service = LibraryBrowserService(browser_db)
+    return service, Path(root_dir)

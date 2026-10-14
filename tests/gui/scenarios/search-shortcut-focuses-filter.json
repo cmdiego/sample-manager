@@ -1,0 +1,19 @@
+{
+  "name": "search-shortcut-focuses-filter",
+  "steps": [
+    {
+      "assert": "filter",
+      "has_focus": false,
+      "text": ""
+    },
+    {
+      "event": "key",
+      "key": "/"
+    },
+    {
+      "assert": "filter",
+      "has_focus": true,
+      "text": ""
+    }
+  ]
+}

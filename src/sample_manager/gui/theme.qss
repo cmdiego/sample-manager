@@ -1,0 +1,66 @@
+/* Base stylesheet for the Sample Manager Qt GUI.
+   Dark, Digitakt-inspired palette. Phase 2 is intentionally minimal; the
+   waveform and richer theming land in later phases. */
+
+QMainWindow,
+QWidget {
+    background-color: #1b1b1f;
+    color: #e6e6e6;
+    font-size: 13px;
+}
+
+QLabel#PreviewTitle,
+QLabel#SessionHeading,
+QLabel#SelectionHeading {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f5a623;
+}
+
+QLabel#PreviewMeta,
+QLabel#SessionMeta {
+    color: #b8b8b8;
+}
+
+QLabel#BrowserBreadcrumb {
+    color: #8a8a8a;
+    padding: 2px 0;
+}
+
+QLineEdit#BrowserFilter {
+    background-color: #26262b;
+    border: 1px solid #3a3a42;
+    border-radius: 4px;
+    padding: 4px 6px;
+    color: #e6e6e6;
+}
+
+QListView {
+    background-color: #202024;
+    border: 1px solid #3a3a42;
+    border-radius: 4px;
+    outline: 0;
+}
+
+QListView::item {
+    padding: 3px 6px;
+}
+
+QListView::item:selected {
+    background-color: #3a3a42;
+    color: #ffffff;
+}
+
+QWidget#WaveformWidget {
+    background-color: #1a1a1a;
+    border: 1px solid #2c2c33;
+    border-radius: 4px;
+}
+
+QLabel#StatusError {
+    color: #d04040;
+}
+
+QSplitter::handle {
+    background-color: #2c2c33;
+}

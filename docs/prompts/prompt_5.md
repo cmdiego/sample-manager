@@ -14,14 +14,14 @@ Scope (ONLY):
   - Attach/detach tags to samples
   - Manage parent edges (child -> parent) with cycle forbid
 - Implement CLI:
-  - `sample tag add <sample-id> <tag>`
-  - `sample tag remove <sample-id> <tag>`
-  - `sample tag bulk --from-search "<query>" --add <tag> [--remove <tag>]`
+  - `sampleman tag add <sample-id> <tag>`
+  - `sampleman tag remove <sample-id> <tag>`
+  - `sampleman tag bulk --from-search "<query>" --add <tag> [--remove <tag>]`
   - (If included in docs/03) tag alias commands and parent-edge commands:
-    - `sample tag alias add <tag> <alias>`
-    - `sample tag alias remove <alias>`
-    - `sample tag parent add <child> <parent>`
-    - `sample tag parent remove <child> <parent>`
+    - `sampleman tag alias add <tag> <alias>`
+    - `sampleman tag alias remove <alias>`
+    - `sampleman tag parent add <child> <parent>`
+    - `sampleman tag parent remove <child> <parent>`
   - If docs/03 does not include these extra commands, implement the underlying service APIs anyway for Phase 6+.
 
 Semantics requirements:
