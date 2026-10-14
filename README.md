@@ -97,6 +97,13 @@ If you prefer the terminal, the legacy Textual TUI is still available:
 sampleman tui    # launches the legacy Textual terminal UI
 ```
 
+In the TUI, press **Tab** to switch between Browser and the selected-files
+Stage. **j/k** or the arrow keys move in the active pane; **Return** or **d**
+removes the highlighted Stage sample. Press **r** to cycle indexed library
+roots. The TUI opens the configured default root at startup, and Stage remains
+available when switching roots. Use the GUI's **Rescan** control or
+`sampleman scan` to pick up filesystem changes.
+
 All the non-interactive subcommands documented below continue to work
 regardless of which frontend you use.
 

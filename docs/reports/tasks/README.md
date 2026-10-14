@@ -31,6 +31,7 @@ Reports created with the Codex `task` skill use this section order:
 | 009 — JSON GUI Testbench | In Progress | 2026-07-08 | [task.md](009-json-gui-testbench/task.md) | Movement runtime and `--simulation` shell implemented. |
 | 010 — Search, Drag and Drop, and Focus | ✅ Done | 2026-10-13 | [task.md](010-search-drag-and-focus/task.md) | GUI search/Stage fixes, `.wave` indexing, and TUI filter repair. |
 | 011 — GUI Library Management | ✅ Done | 2026-10-13 | [task.md](011-library-management/task.md) | Root picker and nonblocking add/rescan workflow. |
+| 012 — TUI Navigation and Stage Focus | ✅ Done | 2026-10-13 | [task.md](012-tui-navigation/task.md) | Make Tab and root cycling usable. |
 
 ## Maintenance Rules
 
