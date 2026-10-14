@@ -88,4 +88,4 @@
 
 - Capability audit references: [Sononym preferences](https://www.sononym.net/docs/manual/preferences/), [filtering](https://www.sononym.net/docs/manual/filtering/), [favorites](https://www.sononym.net/docs/manual/favorites/), and [XO interface overview](https://support.xlnaudio.com/hc/en-us/articles/16920363887645-Interface-Overview).
 - Confirmed gaps: TUI cannot add/rescan a library; tags can be searched but not edited in the TUI; no dedicated favorites, preview volume/loop controls, result sort controls, or metadata filters. Search currently returns at most 500 matches and reports that cap.
-- Next priority: background rescan in the TUI so newly added files can be found without leaving the terminal app. Favorites/tag editing and preview controls follow.
+- Background rescan was implemented next in Task 017. Remaining priorities are TUI Add Folder, favorites/tag editing, and preview controls.

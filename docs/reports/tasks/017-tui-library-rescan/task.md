@@ -1,6 +1,6 @@
 # Task 017 — TUI Library Rescan
 
-- **Status**: In Progress
+- **Status**: Done
 - **Created**: 2026-10-14
 - **Owner**: Codex
 - **Origin**: Continued TUI capability audit requested by the user
@@ -23,10 +23,10 @@
 ## 3. [Todo]
 
 - [x] Verify TUI has no scan action.
-- [ ] Add background rescan and discovery in key help/palette.
-- [ ] Reconcile browser, indexed search, and Stage after scanning.
-- [ ] Test responsiveness, repeated scans, pruning, and failures.
-- [ ] Run validation and open a main-targeted PR.
+- [x] Add background rescan and discovery in key help/palette.
+- [x] Reconcile browser, indexed search, and Stage after scanning.
+- [x] Test responsiveness, repeated scans, pruning, and failures.
+- [x] Run validation and prepare a main-targeted PR.
 
 ## 4. [Implementation + Revert]
 
@@ -54,17 +54,26 @@
 
 ### Changed Files
 
-- Pending.
+- `src/sample_manager/tui/app.py` — F5/palette action, async scanner worker, progress/results/errors, and state reconciliation.
+- `src/sample_manager/tui/data.py` — delegate scan through the existing service's independent SQLite connection.
+- `src/sample_manager/tui/keybindings.py`, `tui/widgets/help_screen.py` — expose Rescan in the footer and help.
+- `tests/test_tui_rescan.py` — real file-backed SQLite tests for pruning, search refresh, responsiveness, root switches, retries, and deleted folders.
+- `README.md` and task tracker — document the new terminal workflow.
 
 ### Behavior Implemented
 
-- Pending.
+- F5 or Rescan Library in the palette starts one background scan of the active indexed root. The status line retains progress despite audio polling, and notifications report completion or failure.
+- Browser focus survives reordered rows when the sample still exists. Active search is rerun with its query preserved; Stage reflects cascaded deletions. Missing viewed folders fall back to the root.
+- Navigation remains responsive, duplicate scans are rejected, and finishing a scan of an old root does not switch the user back to it.
 
 ### Validation
 
-- Pending.
+- `pytest -q tests/test_tui_rescan.py tests/test_tui_navigation.py tests/test_tui_search.py tests/test_tui_settings.py`: 19 passed.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/`: 894 passed, 10 existing deprecation warnings.
+- `git diff --check`: passed.
 
 ### Follow-ups / Risks
 
 - Add Folder remains a CLI/GUI operation; this task refreshes the active indexed library.
 - This branch includes Task 016 and will target main to avoid losing changes through a previously merged base branch.
+- Remaining capability gaps: TUI tag/favorite editing, preview volume/looping, result sorting and metadata filters, and search pagination beyond 500 hits.
