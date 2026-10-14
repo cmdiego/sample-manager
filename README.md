@@ -36,7 +36,11 @@ source .venv/bin/activate
 
 ## First Run
 
-Initialize the user config and example profiles:
+The GUI creates the user config and example profiles automatically on first
+launch. Then choose **Add Folder…** in the Library toolbar to scan your first
+sample folder.
+
+For CLI or TUI setup, initialize those files explicitly:
 
 ```bash
 sampleman init
