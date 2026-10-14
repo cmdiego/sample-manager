@@ -32,6 +32,7 @@ Reports created with the Codex `task` skill use this section order:
 | 010 — Search, Drag and Drop, and Focus | ✅ Done | 2026-10-13 | [task.md](010-search-drag-and-focus/task.md) | GUI search/Stage fixes, `.wave` indexing, and TUI filter repair. |
 | 011 — GUI Library Management | ✅ Done | 2026-10-13 | [task.md](011-library-management/task.md) | Root picker and nonblocking add/rescan workflow. |
 | 012 — TUI Navigation and Stage Focus | ✅ Done | 2026-10-13 | [task.md](012-tui-navigation/task.md) | Make Tab and root cycling usable. |
+| 013 — GUI First-Run Setup | ✅ Done | 2026-10-13 | [task.md](013-gui-first-run/task.md) | Launch without prior CLI initialization. |
 
 ## Maintenance Rules
 
