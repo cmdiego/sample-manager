@@ -1,6 +1,6 @@
 # Task 014 — GUI Seek and Hermetic Lifecycle Fixture
 
-- **Status**: In Progress
+- **Status**: Done
 - **Created**: 2026-10-14
 - **Owner**: Codex
 - **Origin**: User-reported regressions after PRs #3–#5 merged
@@ -11,7 +11,7 @@
 - **Primary areas**: `src/sample_manager/gui/main_window.py`, `src/sample_manager/gui/widgets/preview.py`, `tests/test_e2e_lifecycle.py`.
 - **Supporting areas**: `src/sample_manager/gui/controller.py`, `tests/gui/test_playback_integration.py`, `tests/gui/test_waveform_widget.py`.
 - **Current ownership boundaries**: `WaveformWidget` emits a file-relative seek fraction; `PreviewWidget` converts it to seconds; `BrowserController` owns the active player and can replace it through audio settings. The lifecycle test owns its temporary configuration and database.
-- **Files expected to change**: GUI preview/window wiring, GUI integration test, lifecycle fixture, this report, task tracker.
+- **Files expected to change**: GUI preview/window wiring, GUI integration test fixture and regression test, lifecycle fixture, this report, task tracker.
 - **Files expected to remain untouched**: Audio player seek implementation, TUI seek behavior, production sample scanning and export code.
 
 ## 2. [Interfaces]
@@ -26,11 +26,11 @@
 
 - [x] Reproduce both reports on merged `origin/main`.
 - [x] Inspect player replacement and fixture assumptions.
-- [ ] Wire the GUI waveform to the current player.
-- [ ] Generate a valid temporary WAV inside the lifecycle fixture.
-- [ ] Add a GUI integration regression test.
-- [ ] Run focused, clean-archive, and full-suite validation.
-- [ ] Record final implementation and update the tracker.
+- [x] Wire the GUI waveform to the current player.
+- [x] Generate a valid temporary WAV inside the lifecycle fixture.
+- [x] Add a GUI integration regression test.
+- [x] Run focused, clean-archive, and full-suite validation.
+- [x] Record final implementation and update the tracker.
 
 ## 4. [Implementation + Revert]
 
@@ -58,17 +58,26 @@
 
 ### Changed Files
 
-- Pending.
+- `src/sample_manager/gui/widgets/preview.py` — retain one seek signal connection and route clicks to the current player when its duration is known.
+- `src/sample_manager/gui/main_window.py` — supply the player at startup and after an audio output change.
+- `tests/gui/test_playback_integration.py` — click a ready waveform in a real offscreen window; verify initial, replaced, and disabled players. Wait for the existing real waveform worker before teardown.
+- `tests/gui/conftest.py` — write valid small WAV files for GUI waveform tests.
+- `tests/test_e2e_lifecycle.py` — generate the drum WAV under `tmp_path` and assert paths against that per-test root.
+- `docs/reports/tasks/README.md` — track completion.
 
 ### Behavior Implemented
 
-Pending.
+Clicking a loaded GUI waveform seeks the active player to the clicked fraction of its duration. Replacing or disabling audio output updates the target without accumulating stale signal connections. Lifecycle tests scan and export a generated WAV, with no dependency on ignored `test_lib/` content.
 
 ### Validation
 
 - Baseline clean archive: `pytest -q tests/test_e2e_lifecycle.py` failed 3 of 5 tests because `test_lib/Funky_Disco` does not exist.
 - Baseline GUI: emitting a seek request on a real `MainWindow` called the player's `seek()` zero times.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/gui/test_playback_integration.py`: 15 passed.
+- Clean `git archive HEAD` with no sample pack, using the project virtual environment and archive `PYTHONPATH`: `pytest -q tests/test_e2e_lifecycle.py`: 5 passed.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/`: 880 passed; 10 deprecation warnings. This includes all JSON GUI scenarios.
+- `git diff --check origin/main`: passed.
 
 ### Follow-ups / Risks
 
-- None identified yet.
+- The JSON GUI simulator does not currently accept waveform click events, so the real Qt click is covered by the offscreen integration test.

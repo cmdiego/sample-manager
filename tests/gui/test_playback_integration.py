@@ -216,6 +216,9 @@ def test_window_starts_with_player_and_waveform_service(populated_service, qtbot
     sid = next(it.sample_id for it in items if it.sample_id is not None)
     window._on_focus_changed(sid)
     assert len(player.played) == 1
+    # Let the real waveform worker deliver its signal before the window and
+    # its signal receiver are destroyed at the end of the test.
+    qtbot.waitUntil(lambda: window.preview.waveform._data is not None, timeout=2000)
     window.close()
 
 
@@ -224,10 +227,17 @@ def test_waveform_click_seeks_current_player_after_output_change(populated_servi
     service, root = populated_service
     first = FakePlayer()
     replacement = FakePlayer()
+
+    def make_player(selection):
+        """Return a fresh output player, or no player when output is disabled."""
+        if selection.mode is AudioOutputMode.DISABLED:
+            return None, "Audio output disabled"
+        return replacement, None
+
     window = create_main_window(
         service,
         player=first,
-        audio_player_factory=lambda _selection: (replacement, None),
+        audio_player_factory=make_player,
     )
     qtbot.addWidget(window)
     window.resize(900, 650)
@@ -253,10 +263,19 @@ def test_waveform_click_seeks_current_player_after_output_change(populated_servi
     # replacement, not call a stale signal handler on the closed instance.
     window._apply_audio_output_mode(AudioOutputSelection(AudioOutputMode.SYSTEM_DEFAULT))
     assert first.closed
+    window._on_focus_changed(sid)
     QTest.mouseClick(waveform, Qt.MouseButton.LeftButton, pos=midpoint)
     assert len(first.seeks) == 1
     assert len(replacement.seeks) == 1
     assert abs(replacement.seeks[0] - 4.5) < 0.1
+
+    # Disabling output leaves the visible waveform intact but removes its
+    # playback target; further clicks must not reach either closed player.
+    window._apply_audio_output_mode(AudioOutputSelection(AudioOutputMode.DISABLED))
+    assert replacement.closed
+    QTest.mouseClick(waveform, Qt.MouseButton.LeftButton, pos=midpoint)
+    assert len(first.seeks) == 1
+    assert len(replacement.seeks) == 1
     window.close()
 
 
