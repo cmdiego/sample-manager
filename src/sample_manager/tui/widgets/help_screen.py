@@ -86,7 +86,7 @@ class HelpScreen(ModalScreen):
                 classes="help-row",
             )
             yield Static(
-                "    F2 opens Settings. Search matches names, paths, and tags.",
+                "    F2 opens Settings; F5 rescans files in the current library.",
                 classes="help-row",
             )
             yield Static(

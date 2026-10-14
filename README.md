@@ -105,8 +105,10 @@ In the TUI, press **Tab** to switch between Browser and the selected-files
 Stage. **j/k** or the arrow keys move in the active pane; **Return** or **d**
 removes the highlighted Stage sample. Press **r** to cycle indexed library
 roots. The TUI opens the configured default root at startup, and Stage remains
-available when switching roots. Use the GUI's **Rescan** control or
-`sampleman scan` to pick up filesystem changes.
+available when switching roots. Press **F5** (or choose **Rescan Library** in the
+command palette) to pick up added, changed, or removed files. Scanning runs in
+the background and refreshes Browser, search results, and Stage when complete.
+The current folder and focused sample are preserved when they still exist.
 
 Press **F2** for **Settings**, or find Settings in the **Ctrl+P** command
 palette. Choose an audio output device or disable playback, and turn automatic

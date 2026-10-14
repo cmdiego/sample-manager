@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..db import Db
+from ..scanner import ScanResult
 from ..services.library_browser import LibraryBrowserService
 from .nav_state import NavItem
 
@@ -47,6 +48,10 @@ class TuiDataSource:
             )
             for item in self._service.search_samples(root, query)
         )
+
+    def scan_directory(self, root_path: Path) -> ScanResult:
+        """Reconcile a root using the service's separate worker DB connection."""
+        return self._service.scan_directory(root_path)
 
     def get_selection_ids(self) -> set[int]:
         return self._service.selection_ids()

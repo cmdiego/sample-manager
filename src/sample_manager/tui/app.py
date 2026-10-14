@@ -55,7 +55,10 @@ class SampleManagerApp(App):
     CSS_PATH = Path(__file__).parent / "styles" / "app.tcss"
 
     TITLE = "Sample Manager"
-    BINDINGS = [Binding("f2", "show_settings", "Settings", priority=True)]
+    BINDINGS = [
+        Binding("f2", "show_settings", "Settings", priority=True),
+        Binding("f5", "rescan_library", "Rescan", priority=True),
+    ]
 
     # Extra inline CSS for the grid container (tcss file covers widget styles)
     CSS = """
@@ -99,6 +102,8 @@ class SampleManagerApp(App):
         self._active_pane = "browser"
         self._stage_items: tuple[NavItem, ...] = ()
         self._stage_focused_index = 0
+        self._scan_in_progress = False
+        self._scan_message = ""
         # Typeahead filter state
         self._filter_active: bool = False
         self._filter_query: str = ""
@@ -123,7 +128,7 @@ class SampleManagerApp(App):
             yield BrowserZone(_placeholder, id="browser-zone")
             yield SelectedFilesListWidget(id="selection-list")
         yield Static(
-            "  F2 settings · / search · ? help · q quit",
+            "  F2 settings · F5 rescan · / search · ? help · q quit",
             id="status-bar",
             markup=False,
         )
@@ -180,6 +185,7 @@ class SampleManagerApp(App):
         """Make Settings searchable from Textual's existing command palette."""
         yield from super().get_system_commands(screen)
         yield SystemCommand("Settings", "Audio output and auto-audition preferences", self.action_show_settings)
+        yield SystemCommand("Rescan Library", "Index added, changed, and removed samples", self.action_rescan_library)
 
     def action_show_settings(self) -> None:
         """Open preferences from F2, including before a library is configured."""
@@ -222,6 +228,83 @@ class SampleManagerApp(App):
             old_player.close()
             self._last_auditioned_path = None
         self._preferences = preferences
+
+    # ── background library scanning ────────────────────────────────────────
+
+    def action_rescan_library(self) -> None:
+        """Start one background scan while leaving navigation responsive."""
+        if isinstance(self.screen, ModalScreen):
+            return
+        if self._state is None or self._data is None:
+            self.notify("No indexed library selected. Run sampleman scan <folder> first.")
+            return
+        if self._scan_in_progress:
+            self.notify("A library scan is already running")
+            return
+        root = self._state.current_root
+        self._scan_in_progress = True
+        self._scan_message = f"Scanning {root.name}…"
+        self._set_status(self._build_status())
+        self.run_worker(
+            self._rescan_library(root), name="library-rescan", group="library-rescan",
+            exit_on_error=False,
+        )
+
+    async def _rescan_library(self, root: Path) -> None:
+        """Run blocking I/O off-thread and refresh the TUI on its event loop."""
+        try:
+            result = await asyncio.to_thread(self._data.scan_directory, root)
+        except asyncio.CancelledError:
+            return  # Shutdown discards UI updates; the independent scan can finish.
+        except Exception as exc:  # noqa: BLE001 - leave navigation available on failure
+            self._scan_message = f"Scan failed: {exc}"
+            self.notify(self._scan_message, severity="error", timeout=8)
+        else:
+            self._refresh_after_scan(root)
+            self._scan_message = (
+                f"Scanned {root.name}: {result.inserted} new, "
+                f"{result.updated} updated, {result.pruned} removed"
+            )
+            self.notify(self._scan_message, timeout=8)
+        finally:
+            self._scan_in_progress = False
+            if self.is_running and self._state is not None:
+                self._set_status(self._build_status())
+
+    def _refresh_after_scan(self, scanned_root: Path) -> None:
+        """Preserve browsing/search focus and refresh Stage after index changes."""
+        if self._state is None:
+            return
+        selected = self._data.get_selection_ids()
+        state = self._state.with_selection(selected)
+        if state.current_root == scanned_root:
+            self._indexed = self._data.get_indexed_files(scanned_root)
+            directory = state.current_dir if state.current_dir.is_dir() else scanned_root
+            items = build_items(directory, self._indexed, selected, root=scanned_root)
+            focused_path = state.focused_item.path if state.focused_item else None
+            focused_index = next(
+                (index for index, item in enumerate(items) if item.path == focused_path),
+                min(max(0, state.focused_index), len(items) - 1),
+            )
+            self._state = replace(
+                state, current_dir=directory, items=tuple(items), focused_index=focused_index,
+                dir_stack=state.dir_stack if directory == state.current_dir else (),
+            )
+            if self._filter_query:
+                previous = (
+                    self._filter_results[self._filter_focused_index].path
+                    if 0 <= self._filter_focused_index < len(self._filter_results) else None
+                )
+                self._filter_results = self._data.search_samples(scanned_root, self._filter_query)
+                self._filter_focused_index = next(
+                    (index for index, item in enumerate(self._filter_results) if item.path == previous),
+                    max(0, min(self._filter_focused_index, len(self._filter_results) - 1)),
+                )
+        else:
+            # The user may have switched roots during scanning. Refresh Stage
+            # membership without moving their current browser to the old root.
+            self._state = state
+        self._refresh_ui(audition=False)
 
     # ── data helpers ───────────────────────────────────────────────────────
 
@@ -371,7 +454,8 @@ class SampleManagerApp(App):
             if self._library_roots else "1/1"
         )
         return (
-            f"  F2 settings | {self._state.current_dir}"
+            f"  {self._scan_message + ' | ' if self._scan_message else ''}"
+            f"F2 settings · F5 rescan | {self._state.current_dir}"
             f"{filter_hint}"
             f"  |  {pane_hint} · root {root_hint}"
             f"  |  {focused_name}"
