@@ -33,6 +33,7 @@ Reports created with the Codex `task` skill use this section order:
 | 011 — GUI Library Management | ✅ Done | 2026-10-13 | [task.md](011-library-management/task.md) | Root picker and nonblocking add/rescan workflow. |
 | 012 — TUI Navigation and Stage Focus | ✅ Done | 2026-10-13 | [task.md](012-tui-navigation/task.md) | Make Tab and root cycling usable. |
 | 013 — GUI First-Run Setup | ✅ Done | 2026-10-13 | [task.md](013-gui-first-run/task.md) | Launch without prior CLI initialization. |
+| 014 — GUI Seek and Hermetic Lifecycle Fixture | In Progress | 2026-10-14 | [task.md](014-seek-and-e2e-fixture/task.md) | Fix confirmed waveform wiring and fresh-clone test regressions. |
 
 ## Maintenance Rules
 
