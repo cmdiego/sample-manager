@@ -1,0 +1,11 @@
+{
+  "name": "Escape leaves search while the field still owns keyboard focus",
+  "steps": [
+    {"event": "type_search", "text": "kick"},
+    {"assert": "visible_rows", "names": ["kick.wav — drums"]},
+    {"assert": "filter", "has_focus": true, "text": "kick"},
+    {"event": "key", "key": "Escape"},
+    {"assert": "filter", "has_focus": false, "text": ""},
+    {"assert": "visible_rows", "names": ["drums"]}
+  ]
+}

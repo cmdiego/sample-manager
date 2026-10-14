@@ -55,6 +55,13 @@ sampleman        # launches the Qt GUI
 sampleman gui    # explicit — same as above
 ```
 
+Use the **Library** picker above the workspace to switch between indexed
+folders. **Add Folder…** chooses and scans a new sample folder; **Rescan** picks
+up newly added files and removes entries for files deleted from the active
+folder. The window stays responsive during a scan and shows the counts when it
+finishes. The selected folder becomes the default for the next launch and for
+CLI commands.
+
 For agent-driven or scripted GUI testing, launch the JSON simulation shell:
 
 ```bash
@@ -185,8 +192,9 @@ sampleman scan /path/to/samples --rescan
 sampleman scan /path/to/samples --fast
 ```
 
-If a library was scanned before `.wave` support was added, scan that root again
-to index those files. The GUI searches indexed samples in the active library root.
+If a library was scanned before `.wave` support was added, use **Rescan** in the
+GUI or scan that root again from the CLI to index those files. The GUI searches
+indexed samples in the active library root.
 
 Check indexed library status:
 
