@@ -37,6 +37,7 @@ Reports created with the Codex `task` skill use this section order:
 | 015 — TUI Search Mode Transition | ✅ Done | 2026-10-14 | [task.md](015-tui-search-mode-transition/task.md) | Search cancels waveform navigation without seeking. |
 | 016 — TUI Settings and Library Search | ✅ Done | 2026-10-14 | [task.md](016-tui-settings-search/task.md) | F2 settings, root-wide search, and modal keyboard fixes. |
 | 017 — TUI Library Rescan | ✅ Done | 2026-10-14 | [task.md](017-tui-library-rescan/task.md) | F5 scans in the background and refreshes Browser, search, and Stage. |
+| 018 — Add Libraries from the TUI | In Progress | 2026-10-14 | [task.md](018-tui-add-library/task.md) | F4 adds and indexes sample folders, including first run. |
 
 ## Maintenance Rules
 
