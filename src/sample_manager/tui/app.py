@@ -10,6 +10,7 @@ from typing import Callable
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Container
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Static
 
@@ -27,6 +28,7 @@ from .settings import (
 )
 from .widgets.help_screen import HelpScreen
 from .widgets.settings_screen import SettingsScreen
+from .widgets.tags_screen import TagsScreen
 from .nav_state import NavState, NavItem, build_items
 from .widgets.action_pane import ActionPane
 from .widgets.add_library_screen import AddLibraryScreen
@@ -63,6 +65,7 @@ class SampleManagerApp(App):
         Binding("f2", "show_settings", "Settings", priority=True),
         Binding("f4", "add_library", "Add Folder", priority=True),
         Binding("f5", "rescan_library", "Rescan", priority=True),
+        Binding("f6", "edit_tags", "Tags", priority=True),
     ]
 
     # Extra inline CSS for the grid container (tcss file covers widget styles)
@@ -109,6 +112,7 @@ class SampleManagerApp(App):
         self._stage_focused_index = 0
         self._scan_in_progress = False
         self._scan_message = ""
+        self._audio_poll_timer = None
         # Typeahead filter state
         self._filter_active: bool = False
         self._filter_query: str = ""
@@ -142,7 +146,7 @@ class SampleManagerApp(App):
     # ── lifecycle ──────────────────────────────────────────────────────────
 
     def on_mount(self) -> None:
-        self.set_interval(0.2, self._poll_audio)
+        self._audio_poll_timer = self.set_interval(0.2, self._poll_audio)
         self.call_after_refresh(self._initialize)
 
     def _initialize(self) -> None:
@@ -179,6 +183,9 @@ class SampleManagerApp(App):
         self._load_root(root_path)
 
     def on_unmount(self) -> None:
+        if self._audio_poll_timer is not None:
+            self._audio_poll_timer.stop()
+        self._state = None
         self._audio_player.close()
         if self._db is not None:
             self._db.close()
@@ -192,6 +199,7 @@ class SampleManagerApp(App):
         yield SystemCommand("Settings", "Audio output and auto-audition preferences", self.action_show_settings)
         yield SystemCommand("Add Folder", "Index a sample folder and select its library", self.action_add_library)
         yield SystemCommand("Rescan Library", "Index added, changed, and removed samples", self.action_rescan_library)
+        yield SystemCommand("Sample Tags", "Add or remove tags for the focused sample", self.action_edit_tags)
 
     def action_show_settings(self) -> None:
         """Open preferences from F2, including before a library is configured."""
@@ -345,21 +353,62 @@ class SampleManagerApp(App):
                 state, current_dir=directory, items=tuple(items), focused_index=focused_index,
                 dir_stack=state.dir_stack if directory == state.current_dir else (),
             )
-            if self._filter_query:
-                previous = (
-                    self._filter_results[self._filter_focused_index].path
-                    if 0 <= self._filter_focused_index < len(self._filter_results) else None
-                )
-                self._filter_results = self._data.search_samples(scanned_root, self._filter_query)
-                self._filter_focused_index = next(
-                    (index for index, item in enumerate(self._filter_results) if item.path == previous),
-                    max(0, min(self._filter_focused_index, len(self._filter_results) - 1)),
-                )
+            self._reload_filter_results()
         else:
             # The user may have switched roots during scanning. Refresh Stage
             # membership without moving their current browser to the old root.
             self._state = state
         self._refresh_ui(audition=False)
+
+    # ── sample tagging ─────────────────────────────────────────────────────
+
+    def action_edit_tags(self, sample_id: int | None = None) -> None:
+        """Open tags for the focused Browser/Stage sample, capturing its ID."""
+        if isinstance(self.screen, ModalScreen) or self._data is None:
+            return
+        if sample_id is None:
+            item = self._effective_focused_item()
+            sample_id = item.sample_id if item is not None else None
+        if sample_id is None:
+            self.notify("Focus an indexed sample to edit its tags")
+            return
+        try:
+            details = self._data.get_sample_details(sample_id)
+            if details is None:
+                raise ValueError("This sample is no longer indexed")
+            tags = self._data.get_sample_tags(sample_id)
+        except Exception as exc:  # noqa: BLE001 - stale samples leave navigation available
+            self.notify(f"Could not open tags: {exc}", severity="error")
+            return
+        self.push_screen(TagsScreen(
+            details["filename"], tags,
+            on_add=lambda text: self._change_sample_tag(sample_id, text),
+            on_remove=lambda text: self._change_sample_tag(sample_id, text, remove=True),
+        ))
+
+    def _change_sample_tag(self, sample_id: int, text: str, *, remove: bool = False) -> list[dict]:
+        """Persist one attachment edit and update visible metadata/search hits."""
+        if remove:
+            self._data.remove_sample_tag(sample_id, text)
+        else:
+            self._data.add_sample_tag(sample_id, text)
+        self._reload_filter_results()
+        self._refresh_ui(audition=False)
+        return self._data.get_sample_tags(sample_id)
+
+    def _reload_filter_results(self) -> None:
+        """Rerun an active query after index/tag edits, keeping a surviving hit."""
+        if not self._filter_query or self._state is None:
+            return
+        previous = (
+            self._filter_results[self._filter_focused_index].path
+            if 0 <= self._filter_focused_index < len(self._filter_results) else None
+        )
+        self._filter_results = self._data.search_samples(self._state.current_root, self._filter_query)
+        self._filter_focused_index = next(
+            (index for index, item in enumerate(self._filter_results) if item.path == previous),
+            max(0, min(self._filter_focused_index, len(self._filter_results) - 1)),
+        )
 
     # ── data helpers ───────────────────────────────────────────────────────
 
@@ -521,7 +570,11 @@ class SampleManagerApp(App):
         )
 
     def _set_status(self, text: str) -> None:
-        self.query_one("#status-bar", Static).update(text)
+        """Ignore late worker/timer updates after the status view is removed."""
+        try:
+            self.query_one("#status-bar", Static).update(text)
+        except NoMatches:
+            return
 
     # ── key handling ───────────────────────────────────────────────────────
 
@@ -597,6 +650,19 @@ class SampleManagerApp(App):
             else:
                 return
 
+        # First-run and unavailable-library screens still need application
+        # commands; only sample/navigation actions depend on a loaded state.
+        action = resolve_key(event.key)
+        if action in ("quit", "show_help", "command_palette"):
+            event.stop()
+            if action == "quit":
+                self.exit()
+            elif action == "show_help":
+                self.push_screen(HelpScreen())
+            else:
+                self.action_command_palette()
+            return
+
         if self._state is None:
             return
 
@@ -606,15 +672,12 @@ class SampleManagerApp(App):
             self._enter_waveform_nav()
             return
 
-        action = resolve_key(event.key)
         if action is None:
             return
 
         event.stop()
 
-        if action == "quit":
-            self.exit()
-        elif action == "move_up":
+        if action == "move_up":
             if self._active_pane == "stage":
                 self._stage_focused_index = max(0, self._stage_focused_index - 1)
             elif self._filter_query:
@@ -659,10 +722,8 @@ class SampleManagerApp(App):
                 self._cycle_pane_focus()
             else:
                 self._handle_go_back()
-        elif action == "show_help":
-            self.push_screen(HelpScreen())
-        elif action == "command_palette":
-            self.action_command_palette()
+        elif action == "edit_tags":
+            self.action_edit_tags()
         elif action == "cycle_pane_focus":
             self._cycle_pane_focus()
         elif action == "next_library_root":
@@ -729,11 +790,17 @@ class SampleManagerApp(App):
 
     def _poll_audio(self) -> None:
         if self._state is not None:
+            # App timers can tick while screen children are being unmounted.
+            # Missing views mean teardown, not a playback failure.
+            try:
+                top_display = self.query_one("#top-display", TopDisplayWidget)
+            except NoMatches:
+                return
             playback = self._audio_player.snapshot()
             progress = 0.0
             if playback.duration_seconds and playback.duration_seconds > 0:
                 progress = playback.position_seconds / playback.duration_seconds
-            self.query_one("#top-display", TopDisplayWidget).set_playback_progress(
+            top_display.set_playback_progress(
                 playback.path,
                 progress,
             )
@@ -903,7 +970,7 @@ class SampleManagerApp(App):
         else:
             self.push_screen(
                 ActionPane(item, item.is_selected),
-                callback=self._on_action_pane_dismissed,
+                callback=lambda result, sid=item.sample_id: self._on_action_pane_dismissed(result, sid),
             )
 
     def _handle_select_or_descend(self) -> None:
@@ -975,8 +1042,21 @@ class SampleManagerApp(App):
         self._state = self._state.with_selection(selection_ids)
         self._refresh_ui()
 
-    def _on_action_pane_dismissed(self, result: str | None) -> None:
-        if result == "add":
-            self._add_focused()
-        elif result == "remove":
-            self._remove_focused()
+    def _on_action_pane_dismissed(self, result: str | None, sample_id: int | None) -> None:
+        """Apply file actions to their captured subject after background refresh."""
+        if sample_id is None:
+            return
+        if result == "tags":
+            self.action_edit_tags(sample_id)
+        elif result in ("add", "remove"):
+            try:
+                if self._data.get_sample_details(sample_id) is None:
+                    raise ValueError("This sample is no longer indexed")
+                if result == "add":
+                    self._data.add_to_selection(sample_id)
+                else:
+                    self._data.remove_from_selection(sample_id)
+                self._state = self._state.with_selection(self._data.get_selection_ids())
+                self._refresh_ui(audition=False)
+            except Exception as exc:  # noqa: BLE001 - a scan can remove the captured sample
+                self.notify(f"Could not update Stage: {exc}", severity="error")

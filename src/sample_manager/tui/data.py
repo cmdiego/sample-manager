@@ -14,6 +14,7 @@ from pathlib import Path
 from ..db import Db
 from ..scanner import ScanResult
 from ..services.library_browser import LibraryBrowserService
+from ..tag_service import list_sample_tags, resolve_tag, tag_sample, untag_sample
 from .nav_state import NavItem
 
 
@@ -63,7 +64,37 @@ class TuiDataSource:
         self._service.remove_from_selection(sample_id)
 
     def get_sample_details(self, sample_id: int) -> dict | None:
-        return self._service.sample_details_row(sample_id)
+        """Read preview metadata with the sample's actual visible tag names."""
+        details = self._service.sample_details_row(sample_id)
+        if details is not None:
+            try:
+                details["tags"] = [tag["name_display"] for tag in self.get_sample_tags(sample_id)]
+            except ValueError:
+                # A scanner on its own connection can prune the sample between
+                # these reads. Treat that as an absent row during refresh.
+                return None
+        return details
+
+    def get_sample_tags(self, sample_id: int) -> list[dict]:
+        """Expose visible attachments while preserving globally hidden tags."""
+        return [tag for tag in list_sample_tags(self._db, sample_id) if not tag["is_hidden"]]
+
+    def add_sample_tag(self, sample_id: int, text: str) -> None:
+        """Attach a tag name/alias without creating empty or hidden attachments."""
+        text = text.strip()
+        if not text:
+            raise ValueError("Enter a tag name")
+        try:
+            existing = resolve_tag(self._db, text, include_hidden=True)
+        except ValueError:
+            existing = None
+        if existing is not None and existing["is_hidden"]:
+            raise ValueError("This tag is hidden. Restore it before adding it.")
+        tag_sample(self._db, sample_id, text)
+
+    def remove_sample_tag(self, sample_id: int, name: str) -> None:
+        """Detach a visible tag from one sample without deleting the shared tag."""
+        untag_sample(self._db, sample_id, name)
 
     def get_sample_path(self, sample_id: int) -> Path | None:
         """Resolve a staged sample so pane focus can audition it."""

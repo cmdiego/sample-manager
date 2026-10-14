@@ -52,13 +52,14 @@ class ActionPane(ModalScreen):
         item = self._item
         meta = f"sample_id={item.sample_id}" if item.sample_id else "not indexed"
         with Vertical():
-            yield Static(item.name, classes="action-title")
+            yield Static(item.name, classes="action-title", markup=False)
             yield Static(meta, classes="action-meta")
             if item.sample_id is not None:
                 if self._is_selected:
                     yield Button("Remove from selection  [d]", id="remove", variant="warning")
                 else:
                     yield Button("Add to selection  [a]", id="add", variant="success")
+                yield Button("Edit tags  [t]", id="tags")
             else:
                 yield Static("(not indexed — run `sample scan` first)", classes="action-meta")
             yield Static("ESC to close", classes="action-hint")
@@ -79,3 +80,6 @@ class ActionPane(ModalScreen):
         elif event.key == "d" and self._item.sample_id is not None and self._is_selected:
             event.stop()
             self.dismiss("remove")
+        elif event.key == "t" and self._item.sample_id is not None:
+            event.stop()
+            self.dismiss("tags")
