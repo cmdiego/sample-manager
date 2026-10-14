@@ -28,6 +28,14 @@ class _FakeData:
     def get_selection_ids(self) -> set[int]:
         return set(self.selected)
 
+    def search_samples(self, root: Path, query: str) -> tuple[NavItem, ...]:
+        """Return indexed matches for the navigation pilot's small library."""
+        return tuple(
+            NavItem(path.name, path, False, sid, sid in self.selected)
+            for sid, path in self.paths.items()
+            if path.is_relative_to(root) and query.lower() in path.name.lower()
+        )
+
     def get_sample_details(self, sid: int) -> dict:
         return {"id": sid, "filename": self.paths[sid].name}
 

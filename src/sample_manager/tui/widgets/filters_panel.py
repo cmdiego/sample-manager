@@ -5,6 +5,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
+from rich.markup import escape
 
 
 class FiltersPanel(Widget):
@@ -20,12 +21,23 @@ class FiltersPanel(Widget):
     def compose(self) -> ComposeResult:
         yield Static("  (no filter active)", classes="filter-empty", id="filter-text")
 
-    def update_filter(self, query: str) -> None:
+    def update_filter(
+        self, query: str, *, active: bool = False, count: int | None = None,
+    ) -> None:
+        """Show the actual query separately from the shortcut that opens it."""
         self._query = query
         label = self.query_one("#filter-text", Static)
         if query:
-            self.border_title = f"Filter — /{query}"
-            label.update(f"  [bold yellow]/{query}[/bold yellow]  (type to narrow · backspace · esc to clear)")
+            self.border_title = f"Search — {escape(query)}"
+            matches = f" · {count}{'+' if count == 500 else ''} matches" if count is not None else ""
+            label.update(
+                f"  [bold yellow]{escape(query)}[/bold yellow]{matches} · ↑/↓ results · Esc clear"
+            )
+            label.set_class(True, "filter-text")
+            label.set_class(False, "filter-empty")
+        elif active:
+            self.border_title = "Search library"
+            label.update("  Type a name, path, or tag · Shift+Space for space · Esc cancel")
             label.set_class(True, "filter-text")
             label.set_class(False, "filter-empty")
         else:

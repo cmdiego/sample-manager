@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -82,6 +83,7 @@ class SampleManagerApp(App):
         self._filter_active: bool = False
         self._filter_query: str = ""
         self._filter_focused_index: int = 0
+        self._filter_results: tuple[NavItem, ...] = ()
         self._last_auditioned_path: Path | None = None
         self._waveform_path: Path | None = None
         self._waveform_data: WaveformData | None = None
@@ -164,6 +166,7 @@ class SampleManagerApp(App):
         self._filter_active = False
         self._filter_query = ""
         self._filter_focused_index = 0
+        self._filter_results = ()
         self._refresh_ui()
 
     def _next_library_root(self) -> None:
@@ -177,20 +180,32 @@ class SampleManagerApp(App):
         """Return items filtered by the active typeahead query."""
         if self._state is None:
             return ()
-        items = self._state.items
-        if not self._filter_query:
-            return items
-        q = self._filter_query.lower()
-        return tuple(it for it in items if q in it.name.lower())
+        return self._filter_results if self._filter_query else self._state.items
+
+    def _update_filter_query(self, query: str) -> None:
+        """Query once per edit, preserving the directory cursor for Escape."""
+        self._filter_query = query
+        self._filter_focused_index = 0
+        self._filter_results = (
+            self._data.search_samples(self._state.current_root, query)
+            if query and self._state is not None and self._data is not None else ()
+        )
+        # Typing should not audition every intermediate search prefix.
+        self._refresh_ui(audition=False)
 
     # ── UI refresh ─────────────────────────────────────────────────────────
 
-    def _refresh_ui(self) -> None:
+    def _refresh_ui(self, *, audition: bool = True) -> None:
         """Reconcile Browser, Stage, preview, and status from current state."""
         if self._state is None:
             return
 
         # Build a filtered view of the current state for the sample list
+        selection_ids = self._data.get_selection_ids()
+        self._filter_results = tuple(
+            replace(item, is_selected=item.sample_id in selection_ids)
+            for item in self._filter_results
+        )
         filtered = self._visible_items()
         # Keep the rendered cursor and the action target on the same filtered
         # index. The underlying directory cursor is left intact for Escape.
@@ -211,10 +226,12 @@ class SampleManagerApp(App):
             display_state,
             empty_label="no matches" if self._filter_query else "empty directory",
         )
-        browser.filters_panel.update_filter(self._filter_query)
+        browser.filters_panel.update_filter(
+            self._filter_query, active=self._filter_active,
+            count=len(filtered) if self._filter_query else None,
+        )
 
         # Session summary
-        selection_ids = self._data.get_selection_ids()
         total_bytes = self._data.get_selection_total_size()
         destination = self._data.get_active_destination()
         self.query_one("#session-summary", SessionSummaryWidget).update(
@@ -256,7 +273,8 @@ class SampleManagerApp(App):
         self._request_waveform(focused, top_display)
 
         self._set_status(self._build_status())
-        self._audition_focused()
+        if audition:
+            self._audition_focused()
 
     def _build_status(self) -> str:
         if self._state is None:
@@ -266,7 +284,7 @@ class SampleManagerApp(App):
         sel_count = len(self._state.selection_ids)
         depth = len(self._state.dir_stack)
         back_hint = "  h/← back" if depth > 0 else ""
-        filter_hint = f"  /{self._filter_query}" if self._filter_active else ""
+        filter_hint = f"  Search: {self._filter_query}" if self._filter_active else ""
         playback = self._audio_player.snapshot()
         audio_hint = f"  |  audio:{playback.status.value}"
         if playback.error:
@@ -337,12 +355,17 @@ class SampleManagerApp(App):
                 event.stop()
                 return
             if event.key == "backspace":
-                self._filter_query = self._filter_query[:-1]
-                self._filter_focused_index = 0
-                if not self._filter_query:
-                    self._cancel_filter()
-                else:
-                    self._refresh_ui()
+                # An empty field is still an active search. Otherwise the next
+                # typed letter could unexpectedly become a browser command.
+                self._update_filter_query(self._filter_query[:-1])
+                event.stop()
+                return
+            if event.key in ("slash", "/") and not self._filter_query:
+                # Treat repeated activation keys as activation, not query text.
+                event.stop()
+                return
+            if event.key == "shift+space":
+                self._update_filter_query(self._filter_query + " ")
                 event.stop()
                 return
             # Arrows and Return navigate search results; letters remain text so
@@ -350,9 +373,7 @@ class SampleManagerApp(App):
             if event.key in ("up", "down", "left", "right", "enter", "tab"):
                 pass  # fall through to KEYMAP
             elif event.character and event.character.isprintable():
-                self._filter_query += event.character
-                self._filter_focused_index = 0
-                self._refresh_ui()
+                self._update_filter_query(self._filter_query + event.character)
                 event.stop()
                 return
             else:
@@ -397,7 +418,9 @@ class SampleManagerApp(App):
                 self._state = self._state.move_down()
             self._refresh_ui()
         elif action == "go_back":
-            if self._active_pane == "stage":
+            if self._filter_active:
+                self._cancel_filter()
+            elif self._active_pane == "stage":
                 self._cycle_pane_focus()
             else:
                 self._handle_go_back()
@@ -605,7 +628,15 @@ class SampleManagerApp(App):
         self._filter_active = True
         self._filter_query = ""
         self._filter_focused_index = 0
-        self._refresh_ui()
+        self._filter_results = ()
+        self._refresh_ui(audition=False)
+
+    def on_paste(self, event) -> None:
+        """Accept pasted search text without interpreting it as app commands."""
+        if self._filter_active:
+            text = " ".join(event.text.splitlines())
+            self._update_filter_query(self._filter_query + text)
+            event.stop()
 
     def _cycle_pane_focus(self) -> None:
         """Move keyboard actions between Browser and the persistent Stage."""
@@ -616,6 +647,7 @@ class SampleManagerApp(App):
             self._filter_active = False
             self._filter_query = ""
             self._filter_focused_index = 0
+            self._filter_results = ()
         self._refresh_ui()
 
     def _cancel_filter(self) -> None:
@@ -623,6 +655,7 @@ class SampleManagerApp(App):
         self._filter_active = False
         self._filter_query = ""
         self._filter_focused_index = 0
+        self._filter_results = ()
         self._refresh_ui()
 
     # ── navigation ─────────────────────────────────────────────────────────

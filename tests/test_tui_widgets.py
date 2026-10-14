@@ -239,7 +239,7 @@ class TestFiltersPanel:
         mock_label = MagicMock()
         with patch.object(panel, "query_one", return_value=mock_label):
             panel.update_filter("kick")
-        assert panel.border_title == "Filter — /kick"
+        assert panel.border_title == "Search — kick"
 
     def test_update_filter_non_empty_includes_query_in_label(self):
         panel = FiltersPanel()
