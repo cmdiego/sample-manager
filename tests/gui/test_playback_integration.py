@@ -10,10 +10,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
+
 from sample_manager.audio.player import PlaybackSnapshot, PlaybackStatus
+from sample_manager.audio.waveform import WaveformBin, WaveformData
 from sample_manager.gui.app import create_main_window
 from sample_manager.gui.controller import BrowserController
 from sample_manager.gui.main_window import _format_playback
+from sample_manager.gui.settings import AudioOutputMode, AudioOutputSelection
 
 
 class FakePlayer:
@@ -23,6 +28,7 @@ class FakePlayer:
         self.played: list[Path] = []
         self.restarted: list[Path] = []
         self.paused = 0
+        self.seeks: list[float] = []
         self.closed = False
         self._snapshot = snapshot or PlaybackSnapshot(
             status=PlaybackStatus.PLAYING,
@@ -59,6 +65,10 @@ class FakePlayer:
 
     def snapshot(self) -> PlaybackSnapshot:
         return self._snapshot
+
+    def seek(self, position_seconds: float) -> None:
+        """Record where a waveform click asks the player to seek."""
+        self.seeks.append(position_seconds)
 
     def close(self) -> None:
         self.closed = True
@@ -206,6 +216,47 @@ def test_window_starts_with_player_and_waveform_service(populated_service, qtbot
     sid = next(it.sample_id for it in items if it.sample_id is not None)
     window._on_focus_changed(sid)
     assert len(player.played) == 1
+    window.close()
+
+
+def test_waveform_click_seeks_current_player_after_output_change(populated_service, qtbot):
+    """A real Qt click reaches the active player, even after settings replace it."""
+    service, root = populated_service
+    first = FakePlayer()
+    replacement = FakePlayer()
+    window = create_main_window(
+        service,
+        player=first,
+        audio_player_factory=lambda _selection: (replacement, None),
+    )
+    qtbot.addWidget(window)
+    window.resize(900, 650)
+    window.show()
+
+    # Focus a sample as the browser does, then provide completed waveform data.
+    # This keeps the test independent of an audio decoder and worker timing.
+    sid = _first_sample_id(service, root)
+    window._on_focus_changed(sid)
+    waveform = window.preview.waveform
+    path = service.sample_path(sid)
+    assert path is not None
+    waveform._on_waveform_ready(
+        waveform._generation,
+        WaveformData(path, 9.0, (WaveformBin(-1.0, 1.0),)),
+    )
+    midpoint = QPoint(waveform.width() // 2, waveform.height() // 2)
+    QTest.mouseClick(waveform, Qt.MouseButton.LeftButton, pos=midpoint)
+    assert len(first.seeks) == 1
+    assert abs(first.seeks[0] - 4.5) < 0.1
+
+    # Settings closes the original player. A second click must seek only the
+    # replacement, not call a stale signal handler on the closed instance.
+    window._apply_audio_output_mode(AudioOutputSelection(AudioOutputMode.SYSTEM_DEFAULT))
+    assert first.closed
+    QTest.mouseClick(waveform, Qt.MouseButton.LeftButton, pos=midpoint)
+    assert len(first.seeks) == 1
+    assert len(replacement.seeks) == 1
+    assert abs(replacement.seeks[0] - 4.5) < 0.1
     window.close()
 
 

@@ -64,6 +64,11 @@ class PreviewWidget(QWidget):
         self._waveform = WaveformWidget(service=waveform_service)
         layout.addWidget(self._waveform, stretch=1)
 
+        # Keep one signal connection for the widget's lifetime. Audio settings
+        # can replace the player, so the slot reads the current reference.
+        self._player: AudioPlayer | None = None
+        self._waveform.seek_requested.connect(self._seek_to_fraction)
+
         self.clear()
 
     # -- audio wiring ---------------------------------------------------------
@@ -72,13 +77,19 @@ class PreviewWidget(QWidget):
     def waveform(self) -> WaveformWidget:
         return self._waveform
 
-    def connect_player(self, player: "AudioPlayer") -> None:
-        """Wire waveform click-to-seek into *player*."""
-        self._waveform.seek_requested.connect(
-            lambda frac: player.seek(
-                frac * (player.snapshot().duration_seconds or 0.0)
-            )
-        )
+    def connect_player(self, player: "AudioPlayer | None") -> None:
+        """Direct waveform seeks to the current player after I/O changes."""
+        self._player = player
+
+    def _seek_to_fraction(self, fraction: float) -> None:
+        """Translate the waveform's file fraction into playback seconds."""
+        player = self._player
+        if player is None:
+            return
+        duration = player.snapshot().duration_seconds
+        if duration is None or duration <= 0:
+            return
+        player.seek(fraction * duration)
 
     def set_waveform_service(self, service: "WaveformService | None") -> None:
         self._waveform.set_service(service)
