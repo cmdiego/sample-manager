@@ -1,6 +1,6 @@
 # Task 018 — Add Libraries from the TUI
 
-- **Status**: In Progress
+- **Status**: Done
 - **Created**: 2026-10-14
 - **Owner**: Codex
 - **Origin**: User request to continue improving the TUI
@@ -23,10 +23,10 @@
 ## 3. [Todo]
 
 - [x] Verify PRs #8 and #9 are present on main.
-- [ ] Implement path modal and discoverable Add Folder action.
-- [ ] Support first-run setup and persist successful root selection.
-- [ ] Test invalid paths, cancellation, nested search, root cycling, and reopening.
-- [ ] Validate and open a main-targeted PR with incremental commits.
+- [x] Implement path modal and discoverable Add Folder action.
+- [x] Support first-run setup and persist successful root selection.
+- [x] Test invalid paths, cancellation, nested search, root cycling, and reopening.
+- [x] Validate and prepare a main-targeted PR with incremental commits.
 
 ## 4. [Implementation + Revert]
 
@@ -54,15 +54,22 @@
 
 ### Changed Files
 
-- Pending.
+- `tui/widgets/add_library_screen.py` — path input, quoted/expanded path validation, Enter/Add & Scan, and cancellation.
+- `tui/app.py` — F4/palette discovery, deferred config/profile/DB setup, shared scan worker, root activation and preference persistence.
+- `config.py` — allow the existing idempotent setup helper to receive an explicit configuration path.
+- TUI bindings/help and README — document first-run onboarding and Add Folder.
+- `tests/test_tui_add_library.py` — mounted first-run, reopening, invalid/cancel, duplicate-root, Stage-preservation, and scan-failure cases.
 
 ### Behavior Implemented
 
-- Pending.
+- F4 and Add Folder in the palette work before configuration exists. Valid submission initializes missing storage, scans without blocking, selects the resulting library, and saves it as the next startup root.
+- Repeated additions rescan the same root without duplication. Existing Stage entries survive. Failed scans leave the previous root active and do not register the unsuccessful folder in config.
 
 ### Validation
 
-- Pending.
+- `pytest -q tests/test_tui_add_library.py tests/test_tui_rescan.py`: 6 passed.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/`: 897 passed, 10 existing deprecation warnings.
+- `git diff --check`: passed.
 
 ### Follow-ups / Risks
 
