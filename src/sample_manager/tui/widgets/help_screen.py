@@ -90,6 +90,10 @@ class HelpScreen(ModalScreen):
                 classes="help-row",
             )
             yield Static(
+                "    F6 or t edits the focused sample's tags in Browser or Stage.",
+                classes="help-row",
+            )
+            yield Static(
                 "    Paste a query, or Shift+Space for spaces; Esc clears search.",
                 classes="help-row",
             )

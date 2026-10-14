@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from rich.markup import escape
 
 from textual.app import ComposeResult
 from textual.css.query import NoMatches
@@ -45,12 +46,12 @@ class TopDisplayWidget(Widget):
             return
 
         if item.is_dir:
-            self.border_title = f"Directory — {item.name}"
-            self.mount(Static(f"  {item.name}/", classes="meta-row"))
+            self.border_title = f"Directory — {escape(item.name)}"
+            self.mount(Static(f"  {item.name}/", classes="meta-row", markup=False))
             return
 
         # File — show what we have from the DB
-        self.border_title = f"Preview — {item.name}"
+        self.border_title = f"Preview — {escape(item.name)}"
         rows: list[Widget] = [
             WaveformWidget(item.path, classes="waveform-display"),
         ]
@@ -61,17 +62,17 @@ class TopDisplayWidget(Widget):
             size = _fmt_size(details.get("size_bytes"))
             tags = details.get("tags") or []
 
-            rows.append(Static(f"  [dim]Name:[/dim]  {name}", classes="meta-row"))
+            rows.append(Static(f"  [dim]Name:[/dim]  {escape(str(name))}", classes="meta-row"))
             if ext:
                 rows.append(Static(f"  [dim]Type:[/dim]  {ext.upper()}", classes="meta-row"))
             rows.append(Static(f"  [dim]Size:[/dim]  {size}", classes="meta-row"))
             if tags:
-                tag_str = "  ".join(str(t) for t in tags)
+                tag_str = "  ".join(escape(str(t)) for t in tags)
                 rows.append(Static(f"  [dim]Tags:[/dim]  {tag_str}", classes="meta-row"))
             if item.sample_id is not None:
                 rows.append(Static(f"  [dim]ID:[/dim]   #{item.sample_id}", classes="meta-row"))
         else:
-            rows.append(Static(f"  {item.name}", classes="meta-row"))
+            rows.append(Static(f"  {item.name}", classes="meta-row", markup=False))
             rows.append(Static("  [dim](not indexed)[/dim]", classes="meta-row"))
 
         self.mount(*rows)

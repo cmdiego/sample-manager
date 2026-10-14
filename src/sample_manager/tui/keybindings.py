@@ -33,6 +33,8 @@ KEYMAP: dict[str, str] = {
     "f2": "show_settings",
     "f4": "add_library",
     "f5": "rescan_library",
+    "f6": "edit_tags",
+    "t": "edit_tags",
     # Filter / search
     "slash": "activate_filter",
     "escape": "cancel_or_back",
@@ -68,6 +70,7 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "show_settings": "Audio output and auto-audition settings",
     "add_library": "Add and index a sample folder",
     "rescan_library": "Rescan the active library in the background",
+    "edit_tags": "Edit tags for the focused sample",
     "cancel_or_back": "Cancel filter / go back",
     "cycle_pane_focus": "Switch Browser / Stage",
     "next_library_root": "Switch to next library root",
@@ -77,7 +80,7 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
 # Groupings for the HelpScreen display (order preserved).
 ACTION_CATEGORIES: dict[str, list[str]] = {
     "Navigation": ["move_up", "move_down", "go_back", "select_or_descend", "enter"],
-    "Selection": ["add_to_selection", "remove_from_selection"],
+    "Selection": ["add_to_selection", "remove_from_selection", "edit_tags"],
     "Playback": [
         "toggle_playback",
         "resume_playback",

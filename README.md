@@ -134,6 +134,13 @@ search and restores the directory cursor. Deleting the query keeps search open.
 **Space** controls playback; **Shift+Space** inserts a space in the query.
 Relative folders distinguish results that share a filename.
 
+Press **F6** or **t** to manage tags on the focused sample in Browser or Stage,
+or choose **Edit tags** from its action pane. Enter a tag name or existing alias
+and press **Enter**/**Add**. Choose a listed tag and **Remove selected** to detach
+it from this sample. Changes apply immediately; **Close** or **Escape** ends
+editing. Preview shows the current tags, and active tag searches refresh after
+each edit. Removing an attachment preserves the shared tag and other samples.
+
 All the non-interactive subcommands documented below continue to work
 regardless of which frontend you use.
 
