@@ -1,10 +1,10 @@
 """Help screen — modal overlay listing all keybindings by category.
 
 Displayed when the user presses '?'. Derives its content directly from
-keybindings.KEYMAP, ACTION_CATEGORIES, and ACTION_DESCRIPTIONS so that
-it always stays in sync with the real bindings — no second copy.
+keybindings metadata, including waveform context bindings, so that it
+stays in sync with the real shortcuts.
 
-Dismissed by pressing '?', 'escape', or 'q'.
+Dismissed by pressing '?', 'escape', or 'q'; backslash/F1 switches to commands.
 
 CSS for this widget lives in styles/app.tcss (no inline DEFAULT_CSS).
 """
@@ -16,19 +16,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
-from ..keybindings import ACTION_CATEGORIES, ACTION_DESCRIPTIONS, KEYMAP
-
-
-def _build_inverted_keymap() -> dict[str, list[str]]:
-    """Return action → [key, key, ...] derived from KEYMAP.
-
-    Keys are listed in KEYMAP definition order so the most prominent
-    binding (vim key) appears first.
-    """
-    inverted: dict[str, list[str]] = {}
-    for key, action in KEYMAP.items():
-        inverted.setdefault(action, []).append(key)
-    return inverted
+from ..keybindings import ACTION_CATEGORIES, ACTION_DESCRIPTIONS, action_keys, format_key
 
 
 class HelpScreen(ModalScreen):
@@ -39,7 +27,6 @@ class HelpScreen(ModalScreen):
     """
 
     def compose(self) -> ComposeResult:
-        inverted = _build_inverted_keymap()
         with VerticalScroll(classes="help-container"):
             yield Static("  Sample Manager", classes="help-title")
             yield Static("", classes="help-spacer")
@@ -47,11 +34,8 @@ class HelpScreen(ModalScreen):
             for category, actions in ACTION_CATEGORIES.items():
                 yield Static(f"  {category}", classes="help-category")
                 for action in actions:
-                    if action not in inverted:
-                        continue
                     # Format keys as "j / ↓" style — replace arrow names with symbols
-                    raw_keys = inverted[action]
-                    display_keys = [_fmt_key(k) for k in raw_keys]
+                    display_keys = [format_key(k) for k in action_keys(action)]
                     keys_str = "  /  ".join(display_keys)
                     desc = ACTION_DESCRIPTIONS.get(action, action)
                     yield Static(
@@ -61,6 +45,10 @@ class HelpScreen(ModalScreen):
                 yield Static("", classes="help-spacer")
 
             yield Static("  How to use:", classes="help-category")
+            yield Static(
+                "    Press \\ or F1 to browse commands, then choose a group and action.",
+                classes="help-row",
+            )
             yield Static(
                 "    Browse your sample library with j/k or ↑/↓.",
                 classes="help-row",
@@ -110,20 +98,3 @@ class HelpScreen(ModalScreen):
         if event.key in ("escape", "q", "question_mark"):
             event.stop()
             self.dismiss()
-
-
-_KEY_SYMBOLS: dict[str, str] = {
-    "up": "↑",
-    "down": "↓",
-    "left": "←",
-    "right": "→",
-    "enter": "Return",
-    "escape": "Esc",
-    "tab": "Tab",
-    "backspace": "Backspace",
-}
-
-
-def _fmt_key(key: str) -> str:
-    """Return a display-friendly representation of a key name."""
-    return _KEY_SYMBOLS.get(key, key)
