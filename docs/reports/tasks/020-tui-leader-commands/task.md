@@ -24,10 +24,10 @@
 ## 3. [Todo]
 
 - [x] Inspect existing routing, Help and mounted tests.
-- [ ] Add command metadata, context bindings and shared dispatch.
-- [ ] Implement grouped leader popup and visible entry hints.
-- [ ] Test execution, cancellation, search, first run, waveform and modal isolation.
-- [ ] Inspect terminal layout at 80×24 and run the full suite.
+- [x] Add command metadata, context bindings and shared dispatch.
+- [x] Implement grouped leader popup and visible entry hints.
+- [x] Test execution, cancellation, search, first run, waveform and modal isolation.
+- [x] Inspect terminal layout at 80×24 and run the full suite.
 - [ ] Finalize documentation, incremental commits and PR.
 
 ## 4. [Implementation + Revert]
@@ -57,16 +57,30 @@
 
 ### Changed Files
 
-- Pending implementation.
+- `tui/keybindings.py` — complete command groups, shared shortcut formatting and explicit waveform context bindings.
+- `tui/widgets/commands_screen.py` — grouped leader modal with keyboard/mouse actions, live prerequisite checks and persistent instructions.
+- `tui/app.py` — backslash/F1 entry, availability explanations, shared command dispatcher and visible hints.
+- `tui/widgets/help_screen.py` — shared shortcut metadata including previously missing waveform controls.
+- `tests/test_tui_commands.py` — nine mounted/metadata regressions covering discovery, execution, cancellation, modes and first run.
+- `README.md` — leader sequences and text-entry behavior.
 
 ### Behavior Implemented
 
-- Planning complete; no implementation yet.
+- Backslash or F1 opens all seven command groups without a timeout. Letter mnemonics, arrows/Return and mouse selection share the same execution path.
+- Unavailable actions remain visible with reasons; activation checks current state before dismissal and again before dispatch.
+- Escape/Backspace returns to groups, then closes. Backslash/F1 closes immediately. Search text, Stage focus and waveform cursor survive cancellation.
+- Normal dialogs retain literal backslash input. Search reserves the leader; pasted queries may contain literal backslashes.
+- Waveform shortcuts now appear in Help and use the same table as event routing.
 
 ### Validation
 
-- Pending focused pilots, terminal layout inspection and full pytest suite.
+- `.venv/bin/python -m pytest -q tests/test_tui_commands.py`: 9 passed.
+- Existing keybinding/help/navigation pilot subset: 32 passed.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/`: 913 passed, 10 existing deprecation warnings.
+- `git diff --check`: passed.
+- Exported and inspected root/waveform popup screenshots at 80×24; dialog is 76×22, with scrollable entries and fixed instructions. Temporary screenshots are outside the repository.
 
 ### Follow-ups / Risks
 
-- Textual priority bindings and modal bubbling need mounted tests to prevent duplicate actions or hidden-browser changes.
+- Initial cancellation test failures were caused by issuing keys before deferred app initialization finished; mounted tests now wait for initial refresh before exercising workflows.
+- Final review and PR publication pending.

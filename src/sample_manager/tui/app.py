@@ -22,11 +22,12 @@ from ..config import (
 from ..db import Db
 from ..migrations import apply_migrations
 from .data import TuiDataSource
-from .keybindings import resolve_key
+from .keybindings import WAVEFORM_KEYMAP, resolve_key
 from .settings import (
     TuiPreferences, build_tui_player, load_tui_preferences, save_tui_preferences,
 )
 from .widgets.help_screen import HelpScreen
+from .widgets.commands_screen import CommandsScreen
 from .widgets.settings_screen import SettingsScreen
 from .widgets.tags_screen import TagsScreen
 from .nav_state import NavState, NavItem, build_items
@@ -62,6 +63,7 @@ class SampleManagerApp(App):
 
     TITLE = "Sample Manager"
     BINDINGS = [
+        Binding("f1", "show_commands", "Commands", priority=True),
         Binding("f2", "show_settings", "Settings", priority=True),
         Binding("f4", "add_library", "Add Folder", priority=True),
         Binding("f5", "rescan_library", "Rescan", priority=True),
@@ -137,7 +139,7 @@ class SampleManagerApp(App):
             yield BrowserZone(_placeholder, id="browser-zone")
             yield SelectedFilesListWidget(id="selection-list")
         yield Static(
-            "  F2 settings · F4 add folder · F5 rescan · / search · ? help · q quit",
+            "  \\ commands · F2 settings · F4 add folder · / search · ? help · q quit",
             id="status-bar",
             markup=False,
         )
@@ -559,7 +561,7 @@ class SampleManagerApp(App):
         )
         return (
             f"  {self._scan_message + ' | ' if self._scan_message else ''}"
-            f"F2 settings · F5 rescan | {self._state.current_dir}"
+            f"\\ commands · F2 settings · F5 rescan | {self._state.current_dir}"
             f"{filter_hint}"
             f"  |  {pane_hint} · root {root_hint}"
             f"  |  {focused_name}"
@@ -578,44 +580,87 @@ class SampleManagerApp(App):
 
     # ── key handling ───────────────────────────────────────────────────────
 
+    def action_show_commands(self) -> None:
+        """Open leader discovery without changing the underlying interaction mode."""
+        if isinstance(self.screen, CommandsScreen):
+            self.screen.dismiss(None)
+        elif not isinstance(self.screen, ModalScreen):
+            self.push_screen(CommandsScreen(self._command_unavailable), self._on_command_chosen)
+
+    def _on_command_chosen(self, action: str | None) -> None:
+        """Execute after modal dismissal, rechecking any background state changes."""
+        if action is None:
+            return
+        reason = self._command_unavailable(action)
+        if reason:
+            self.notify(reason, title="Command unavailable")
+        else:
+            self._execute_command(action)
+
+    def _command_unavailable(self, action: str) -> str | None:
+        """Explain actionable prerequisites while keeping every command discoverable."""
+        if action in ("add_library", "rescan_library") and self._scan_in_progress:
+            return "A library scan is already running."
+        if action in ("quit", "show_help", "show_commands", "command_palette", "show_settings", "add_library"):
+            return None
+        if self._state is None:
+            return "Add a sample folder first (F4)."
+        if action == "next_library_root" and len(self._library_roots) < 2:
+            return "Add another library folder first (F4)."
+        if action == "waveform_nav_enter":
+            if self._filter_active:
+                return "Leave search first (Esc)."
+            if self._waveform_data is None:
+                return "Choose a sample and wait for its waveform."
+        if action in WAVEFORM_KEYMAP.values() and not self._waveform_nav_active:
+            return "Enter waveform navigation first (w)."
+        item = self._effective_focused_item()
+        if action in ("enter", "select_or_descend") and item is None:
+            return "Choose an item in Browser or Stage first."
+        if action in ("add_to_selection", "remove_from_selection", "edit_tags"):
+            if item is None or item.is_dir or item.sample_id is None:
+                return "Choose an indexed sample first."
+            if action == "add_to_selection" and item.is_selected:
+                return "This sample is already in Stage."
+            if action == "remove_from_selection" and not item.is_selected:
+                return "This sample is not in Stage."
+        if action in ("toggle_playback", "resume_playback"):
+            if self._preferences.audio_output == "disabled":
+                return "Enable audio output in Settings (F2)."
+            playback = self._audio_player.snapshot()
+            if action == "resume_playback" and (
+                playback.status is not PlaybackStatus.PAUSED or playback.path is None
+            ):
+                return "No paused sample to resume."
+            if action == "toggle_playback" and playback.status not in (
+                PlaybackStatus.PLAYING, PlaybackStatus.LOADING, PlaybackStatus.PAUSED,
+            ) and (item is None or item.is_dir):
+                return "Choose a sample to play first."
+        return None
+
     def on_key(self, event) -> None:
         """Route keys to the active pane, filter, playback, or modal action."""
         # Controls and dialogs own their input. Unhandled keys must not mutate
         # the hidden browser or quit the app while a modal is open.
         if len(self.screen_stack) > 1:
             return
+        # The leader also works during search; dismissing it preserves the query.
+        # Real dialog Inputs still own backslashes (paths/tag names) above.
+        if event.key == "backslash":
+            event.stop()
+            self.action_show_commands()
+            return
         # Playback is global; filter mode must not consume transport keys.
         if event.key in ("space", "ctrl+space") and self._state is not None:
             event.stop()
-            if event.key == "space":
-                self._toggle_playback()
-            else:
-                self._resume_playback()
+            self._execute_command(resolve_key(event.key))
             return
 
         # Waveform navigation mode intercepts movement and confirm/exit keys.
         if self._waveform_nav_active:
-            nav_keys = {
-                "left": "fine_left",
-                "h": "fine_left",
-                "right": "fine_right",
-                "l": "fine_right",
-                "shift+left": "coarse_left",
-                "shift+right": "coarse_right",
-                "home": "home",
-                "end": "end",
-            }
-            if event.key in nav_keys:
+            if event.key in WAVEFORM_KEYMAP:
                 event.stop()
-                self._waveform_nav_move(nav_keys[event.key])
-                return
-            if event.key in ("enter",):
-                event.stop()
-                self._exit_waveform_nav(seek=True)
-                return
-            if event.key in ("escape",):
-                event.stop()
-                self._exit_waveform_nav(seek=False)
+                self._execute_command(WAVEFORM_KEYMAP[event.key])
                 return
             # All other keys (space, j/k, etc.) fall through.
 
@@ -650,33 +695,40 @@ class SampleManagerApp(App):
             else:
                 return
 
-        # First-run and unavailable-library screens still need application
-        # commands; only sample/navigation actions depend on a loaded state.
         action = resolve_key(event.key)
-        if action in ("quit", "show_help", "command_palette"):
+        if action is not None:
             event.stop()
-            if action == "quit":
-                self.exit()
-            elif action == "show_help":
-                self.push_screen(HelpScreen())
-            else:
-                self.action_command_palette()
-            return
+            self._execute_command(action)
 
+    def _execute_command(self, action: str) -> None:
+        """Keep direct shortcuts and leader selections on the same dispatch path."""
+        app_actions = {
+            "quit": self.exit,
+            "show_help": lambda: self.push_screen(HelpScreen()),
+            "show_commands": self.action_show_commands,
+            "command_palette": self.action_command_palette,
+            "show_settings": self.action_show_settings,
+            "add_library": self.action_add_library,
+            "rescan_library": self.action_rescan_library,
+            "edit_tags": self.action_edit_tags,
+        }
+        if action in app_actions:
+            app_actions[action]()
+            return
         if self._state is None:
             return
-
-        # Activate waveform nav mode (w key, outside KEYMAP to keep it exclusive).
-        if event.key == "w" and not self._filter_active:
-            event.stop()
-            self._enter_waveform_nav()
+        if action == "waveform_nav_enter":
+            # Keep the current sample/query intact; search owns letter input.
+            if not self._filter_active:
+                self._enter_waveform_nav()
             return
-
-        if action is None:
+        if action in WAVEFORM_KEYMAP.values():
+            if self._waveform_nav_active:
+                if action in ("waveform_seek_confirm", "waveform_nav_exit"):
+                    self._exit_waveform_nav(seek=action == "waveform_seek_confirm")
+                else:
+                    self._waveform_nav_move(action.removeprefix("waveform_seek_"))
             return
-
-        event.stop()
-
         if action == "move_up":
             if self._active_pane == "stage":
                 self._stage_focused_index = max(0, self._stage_focused_index - 1)
@@ -722,8 +774,6 @@ class SampleManagerApp(App):
                 self._cycle_pane_focus()
             else:
                 self._handle_go_back()
-        elif action == "edit_tags":
-            self.action_edit_tags()
         elif action == "cycle_pane_focus":
             self._cycle_pane_focus()
         elif action == "next_library_root":

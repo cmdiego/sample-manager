@@ -106,6 +106,16 @@ For the keyboard-driven terminal interface:
 sampleman tui
 ```
 
+Press **`\`** (the leader key) or **F1** to browse available commands. Choose a
+group and then an action using the displayed letters, arrow keys and **Enter**,
+or the mouse. For example, **`\` → l → a** opens Add Folder. Each action shows
+its regular shortcut; unavailable actions explain what is needed. The panel
+stays open until you choose an action or close it. **Escape** returns to the
+groups, then closes; **`\`** or **F1** closes immediately. Opening and canceling
+preserves your search and cursor. Dialog text fields accept `\` normally;
+paste a query if you need a literal backslash in search. **?** opens the full
+shortcut reference, including waveform controls.
+
 In the TUI, press **Tab** to switch between Browser and the selected-files
 Stage. **j/k** or the arrow keys move in the active pane; **Return** or **d**
 removes the highlighted Stage sample. Press **r** to cycle indexed library
