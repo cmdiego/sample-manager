@@ -929,10 +929,9 @@ class SampleManagerApp(App):
             return
 
         if item.path == self._waveform_path:
-            if self._waveform_data is not None:
-                top_display.set_waveform_data(self._waveform_data)
-            else:
-                top_display.set_waveform_loading(item.path)
+            # The preview retains this sample's widget. Reapplying data would
+            # reset its cursors; reapplying loading would erase a decode error.
+            # Its original worker still owns any in-flight completion.
             return
 
         self._waveform_generation += 1
