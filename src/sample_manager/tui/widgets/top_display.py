@@ -6,7 +6,6 @@ from pathlib import Path
 from rich.markup import escape
 
 from textual.app import ComposeResult
-from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Static
 
@@ -34,12 +33,26 @@ class TopDisplayWidget(Widget):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.border_title = "Preview"
+        # Keep the current target synchronously: Textual removes/mounts children
+        # asynchronously, so a query can still find the outgoing waveform.
+        self._waveform: WaveformWidget | None = None
 
     def compose(self) -> ComposeResult:
         yield Static("  [ no sample focused ]", classes="meta-row")
 
     def update_focus(self, item: NavItem | None, details: dict | None) -> None:
-        self.remove_children()
+        """Refresh metadata while retaining waveform state for the same sample."""
+        path = item.path if item is not None and not item.is_dir else None
+        reuse_waveform = (
+            path is not None and self._waveform is not None and self._waveform.path == path
+        )
+        if reuse_waveform:
+            # Selection/tags do not change the audio: keep data, loading/error
+            # state, playback progress and the seek cursor on the existing view.
+            self.remove_children(".meta-row")
+        else:
+            self.remove_children()
+            self._waveform = None
         if item is None:
             self.border_title = "Preview"
             self.mount(Static("  [ no sample focused ]", classes="meta-row"))
@@ -52,9 +65,10 @@ class TopDisplayWidget(Widget):
 
         # File — show what we have from the DB
         self.border_title = f"Preview — {escape(item.name)}"
-        rows: list[Widget] = [
-            WaveformWidget(item.path, classes="waveform-display"),
-        ]
+        rows: list[Widget] = []
+        if not reuse_waveform:
+            self._waveform = WaveformWidget(item.path, classes="waveform-display")
+            rows.append(self._waveform)
 
         if details:
             name = details.get("filename", item.name)
@@ -103,7 +117,5 @@ class TopDisplayWidget(Widget):
             waveform.set_nav_cursor(fraction)
 
     def _waveform_widget(self) -> WaveformWidget | None:
-        try:
-            return self.query(WaveformWidget).first()
-        except NoMatches:
-            return None
+        """Return the current target even while its mount is still pending."""
+        return self._waveform

@@ -1,6 +1,6 @@
 # Task 021 — Preserve the TUI Waveform on Selection
 
-- **Status**: In Progress
+- **Status**: Done
 - **Created**: 2026-10-14
 - **Owner**: Codex
 - **Origin**: User reports repeated Enter leaves the current waveform loading forever
@@ -24,10 +24,10 @@
 ## 3. [Todo]
 
 - [x] Inspect preview remounting and waveform cache handling.
-- [ ] Reproduce repeated Enter using the production waveform request path.
-- [ ] Preserve loaded/loading/error waveform state for the same sample.
-- [ ] Test sample changes and late waveform completion.
-- [ ] Run focused and full suites, review, commit incrementally and publish PR.
+- [x] Reproduce repeated Enter using the production waveform request path.
+- [x] Preserve loaded/loading/error waveform state for the same sample.
+- [x] Test sample changes and late waveform completion.
+- [x] Run focused and full suites, review and prepare incremental commits for PR publication.
 
 ## 4. [Implementation + Revert]
 
@@ -54,16 +54,25 @@
 
 ### Changed Files
 
-- Pending implementation.
+- `tui/widgets/top_display.py` — retain the current waveform widget when the sample path matches; refresh metadata rows independently; target waveform setters through a synchronous reference rather than querying outgoing children.
+- `tui/app.py` — return immediately for the current waveform request, preserving loaded data, an in-flight load or a completed error.
+- `tests/test_tui_waveform_lifecycle.py` — real mounted preview/worker regressions using isolated SQL and controlled decoding.
 
 ### Behavior Implemented
 
 - Found that every preview refresh removes/recreates its children, while cached waveform data is synchronously sent to a widget being removed.
+- Repeated Enter now only changes selection/metadata; the existing waveform remains mounted and is decoded once.
+- Metadata refresh preserves seek and playback cursors. Refresh during decoding retains the worker target, and refresh after decoding failure retains the error message instead of returning to loading forever.
+- Changing samples creates a new waveform target; canceled/stale completions cannot overwrite the focused sample's data.
 
 ### Validation
 
-- Pending regression reproduction and test suites.
+- Before the fix, the new repeated-Enter regression failed because the displayed waveform lost its data after Enter.
+- Focused lifecycle/widget/waveform/tag suite: 89 passed before adding the successful in-flight completion parameter.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/`: 918 passed, 10 existing deprecation warnings, including all five new lifecycle regressions.
+- `git diff --check`: passed; reviewed production changes limited to preview ownership and same-path request handling.
 
 ### Follow-ups / Risks
 
-- Existing navigation pilots stub `_request_waveform`; new tests must exercise the production request/display lifecycle.
+- Prior navigation pilots stubbed `_request_waveform`; the new regressions exercise the production request/display lifecycle and actual rendered waveform state.
+- No known blockers. Branch: `codex/tui-waveform-reuse`, PR base: `main`.
