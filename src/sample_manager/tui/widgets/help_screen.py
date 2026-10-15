@@ -1,10 +1,10 @@
 """Help screen — modal overlay listing all keybindings by category.
 
 Displayed when the user presses '?'. Derives its content directly from
-keybindings.KEYMAP, ACTION_CATEGORIES, and ACTION_DESCRIPTIONS so that
-it always stays in sync with the real bindings — no second copy.
+keybindings metadata, including waveform context bindings, so that it
+stays in sync with the real shortcuts.
 
-Dismissed by pressing '?', 'escape', or 'q'.
+Dismissed by pressing '?', 'escape', or 'q'; backslash/F1 switches to commands.
 
 CSS for this widget lives in styles/app.tcss (no inline DEFAULT_CSS).
 """

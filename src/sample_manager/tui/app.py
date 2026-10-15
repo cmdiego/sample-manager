@@ -582,6 +582,10 @@ class SampleManagerApp(App):
 
     def action_show_commands(self) -> None:
         """Open leader discovery without changing the underlying interaction mode."""
+        if isinstance(self.screen, HelpScreen):
+            # These are two views of the same help flow; replace rather than
+            # stacking them so Escape always returns to the original browser.
+            self.pop_screen()
         if isinstance(self.screen, CommandsScreen):
             self.screen.dismiss(None)
         elif not isinstance(self.screen, ModalScreen):
@@ -643,6 +647,9 @@ class SampleManagerApp(App):
         # Controls and dialogs own their input. Unhandled keys must not mutate
         # the hidden browser or quit the app while a modal is open.
         if len(self.screen_stack) > 1:
+            if event.key == "backslash" and isinstance(self.screen, HelpScreen):
+                event.stop()
+                self.action_show_commands()
             return
         # The leader also works during search; dismissing it preserves the query.
         # Real dialog Inputs still own backslashes (paths/tag names) above.

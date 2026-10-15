@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, Static
 
 from sample_manager.audio import PlaybackStatus, WaveformBin, WaveformData
 from sample_manager.tui.app import SampleManagerApp
@@ -212,6 +212,12 @@ def test_leader_keyboard_list_selection_and_full_help(root):
             text = " ".join(widget.content for widget in app.screen.query(Static))
             assert "Waveform (after w)" in text
             assert "Shift+←" in text and "sample start" in text and "F1" in text
+            await pilot.press("f1")
+            assert isinstance(app.screen, CommandsScreen)
+            assert len(app.screen_stack) == 2
+            await pilot.press("?", "backslash")
+            assert isinstance(app.screen, CommandsScreen)
+            assert len(app.screen_stack) == 2
             await pilot.press("escape")
             assert app.is_running and len(app.screen_stack) == 1
     asyncio.run(exercise())
