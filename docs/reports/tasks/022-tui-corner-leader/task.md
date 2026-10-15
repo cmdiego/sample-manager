@@ -24,8 +24,8 @@
 ## 3. [Todo]
 
 - [x] Inspect existing leader implementation and user reference.
-- [ ] Add compact labels, next-key rows, right/bottom anchoring and transparent overlay.
-- [ ] Verify size, prefix navigation, outside dismissal and existing execution behavior.
+- [x] Add compact labels, next-key rows, right/bottom anchoring and transparent overlay.
+- [x] Verify size, prefix navigation, outside dismissal and existing execution behavior.
 - [ ] Inspect rendered terminal layouts, run full suite, commit and publish PR.
 
 ## 4. [Implementation + Revert]
@@ -52,16 +52,24 @@
 
 ### Changed Files
 
-- Pending implementation.
+- `tui/widgets/commands_screen.py` — transparent, content-sized lower-right popup, next-key rows and prefix border title; contextual status and outside-click dismissal.
+- `tests/test_tui_commands.py` — corner geometry/transparency, prefix, outside click and small-terminal scrolling; retained existing execution/input regressions.
+- `README.md` — corner hint behavior.
 
 ### Behavior Implemented
 
-- Pending implementation.
+- Leader/F1 shows one row per continuation; group names use a `+` marker, letters and arrows execute the existing command tree, and active sequences update the border title.
+- Underlying Browser stays visible without dimming. Prerequisite explanations appear only for highlighted/unavailable actions. Full Help remains a separate `?` action.
+- Escape/Backspace navigates back, leader/F1 closes, and outside clicks dismiss without reaching Browser.
 
 ### Validation
 
-- Pending mounted tests, screenshot inspection and full suite.
+- Command tests: 12 passed.
+- Full suite before integrating the preceding waveform fix: 916 passed, 10 existing deprecation warnings.
+- Inspected root/group screenshots at 80×24. Root popup is 56×10 at coordinates (23,12), above the footer; smaller groups shrink with their content.
+- Geometry tested at 80×24 and 120×40; all hints remain reachable by scrolling at 40×12.
+- Final combined validation pending.
 
 ### Follow-ups / Risks
 
-- The previous waveform PR is still open; this branch starts at merged main so the presentation fix can be reviewed independently.
+- The preceding waveform PR remains open. Integrate its commits before publication so the branch retains both improvements; PR targets main.
