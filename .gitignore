@@ -17,3 +17,21 @@ build/
 # Third-party sample packs (local test data; not redistributable)
 test_lib/
 Mars_808/
+
+# Local agent instructions, memory, skills, and tool configuration
+.agents/
+.claude/
+.codex/
+.cursor/
+.specify/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+
+# AI prompts, planning documents, task reports, and session transcripts
+/docs/prompts/
+/docs/reports/
+/docs/Archive/
+/docs/appendix-phase2-ddl-and-ctes.md
+/specs/
+/dev_docs/session-*.md
