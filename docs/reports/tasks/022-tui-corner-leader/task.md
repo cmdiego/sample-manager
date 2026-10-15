@@ -1,6 +1,6 @@
 # Task 022 — Corner Leader Hints
 
-- **Status**: In Progress
+- **Status**: Done
 - **Created**: 2026-10-14
 - **Owner**: Codex
 - **Origin**: User correction with a Neovim-style command hint reference
@@ -26,7 +26,7 @@
 - [x] Inspect existing leader implementation and user reference.
 - [x] Add compact labels, next-key rows, right/bottom anchoring and transparent overlay.
 - [x] Verify size, prefix navigation, outside dismissal and existing execution behavior.
-- [ ] Inspect rendered terminal layouts, run full suite, commit and publish PR.
+- [x] Inspect rendered terminal layouts, run full suite and prepare committed changes for PR publication.
 
 ## 4. [Implementation + Revert]
 
@@ -68,8 +68,10 @@
 - Full suite before integrating the preceding waveform fix: 916 passed, 10 existing deprecation warnings.
 - Inspected root/group screenshots at 80×24. Root popup is 56×10 at coordinates (23,12), above the footer; smaller groups shrink with their content.
 - Geometry tested at 80×24 and 120×40; all hints remain reachable by scrolling at 40×12.
-- Final combined validation pending.
+- Full combined suite after integrating the preceding waveform fix: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/` — 921 passed, 10 existing deprecation warnings.
+- `git diff --check origin/main...HEAD`: passed.
 
 ### Follow-ups / Risks
 
-- The preceding waveform PR remains open. Integrate its commits before publication so the branch retains both improvements; PR targets main.
+- Includes the preceding waveform-fix commits from PR #13 so the local branch retains both improvements. PR targets main; merging #13 first reduces its diff to the leader-popup work.
+- Integration required resolving only adjacent task tracker rows; both reports are retained. No known blockers.

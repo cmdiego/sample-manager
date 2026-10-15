@@ -41,7 +41,7 @@ Reports created with the Codex `task` skill use this section order:
 | 019 — TUI Sample Tags | ✅ Done | 2026-10-14 | [task.md](019-tui-sample-tags/task.md) | F6 tag editing, search refresh, and TUI lifecycle fixes. |
 | 020 — TUI Leader Command Panel | ✅ Done | 2026-10-14 | [task.md](020-tui-leader-commands/task.md) | Discoverable commands through backslash/F1 and grouped executable hints. |
 | 021 — Preserve the TUI Waveform on Selection | ✅ Done | 2026-10-14 | [task.md](021-tui-waveform-reuse/task.md) | Repeated Enter reuses the current waveform. |
-| 022 — Corner Leader Hints | In Progress | 2026-10-14 | [task.md](022-tui-corner-leader/task.md) | Compact next-key hints at the lower right. |
+| 022 — Corner Leader Hints | ✅ Done | 2026-10-14 | [task.md](022-tui-corner-leader/task.md) | Compact next-key hints at the lower right. |
 
 ## Maintenance Rules
 
