@@ -231,7 +231,7 @@ def test_leader_mouse_selection_and_modal_text_ownership(root):
             await pilot.pause()
             await pilot.press("backslash")
             # The first visible option is Navigation; clicking shares the key path.
-            assert await pilot.click("#commands-list", offset=(3, 1))
+            assert await pilot.click("#commands-list", offset=(3, 0))
             assert app.screen._group.title == "Navigation"
             await pilot.press("backslash", "f4")
             assert isinstance(app.screen, AddLibraryScreen)
@@ -240,6 +240,48 @@ def test_leader_mouse_selection_and_modal_text_ownership(root):
             assert app.screen.query_one(Input) is field
             assert field.value == "\\"
             assert len(app.screen_stack) == 2
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("size", [(80, 24), (120, 40)])
+def test_leader_is_compact_transparent_corner_popup(root, size):
+    """Leader hints occupy the lower-right corner and update with the prefix."""
+    async def exercise():
+        app = _CommandsApp(root)
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            await pilot.press("backslash")
+            popup = app.screen.query_one("#commands-dialog")
+            assert popup.region.right == size[0] - 1
+            assert popup.region.bottom == size[1] - 2
+            assert popup.region.width <= 56
+            assert popup.region.height <= 12
+            assert app.screen.styles.background.a == 0
+            assert "Leader" in popup.border_title
+            await pilot.press("s")
+            assert "\\ s" in popup.border_title
+            assert popup.region.height <= 12
+            await pilot.click(offset=(0, 0))
+            assert len(app.screen_stack) == 1
+            assert app.selected == {1, 2}
+    asyncio.run(exercise())
+
+
+def test_leader_long_group_scrolls_in_small_terminal(root):
+    """A short terminal can still reach the last next-key hint with the keyboard."""
+    async def exercise():
+        app = _CommandsApp(root)
+        async with app.run_test(size=(40, 12)) as pilot:
+            await pilot.pause()
+            await pilot.press("backslash", "w", "end")
+            await pilot.pause()
+            popup = app.screen.query_one("#commands-dialog")
+            listing = app.screen.query_one("#commands-list")
+            assert popup.region.right == 39 and popup.region.bottom == 10
+            assert listing.highlighted == 7
+            assert listing.scroll_y > 0
+            await pilot.press("escape", "escape")
+            assert len(app.screen_stack) == 1
     asyncio.run(exercise())
 
 

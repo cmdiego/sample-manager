@@ -106,13 +106,16 @@ For the keyboard-driven terminal interface:
 sampleman tui
 ```
 
-Press **`\`** (the leader key) or **F1** to browse available commands. Choose a
-group and then an action using the displayed letters, arrow keys and **Enter**,
-or the mouse. For example, **`\` → l → a** opens Add Folder. Each action shows
-its regular shortcut; unavailable actions explain what is needed. The panel
+Press **`\`** (the leader key) or **F1** for a compact popup in the lower-right
+corner. It shows the possible next keys, updating as you enter a command
+sequence while the browser stays visible. Choose a group and then an action
+using the displayed letters, arrow keys and **Enter**, or the mouse. For example,
+**`\` → l → a** opens Add Folder. Each action shows its regular shortcut;
+highlighting an unavailable action explains what is needed. The popup
 stays open until you choose an action or close it. **Escape** returns to the
 groups, then closes; **`\`** or **F1** closes immediately. Opening and canceling
-preserves your search and cursor. Dialog text fields accept `\` normally;
+preserves your search and cursor. Clicking outside also closes it.
+Dialog text fields accept `\` normally;
 paste a query if you need a literal backslash in search. **?** opens the full
 shortcut reference, including waveform controls.
 
