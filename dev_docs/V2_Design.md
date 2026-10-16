@@ -425,8 +425,10 @@ TCSS theming, mouse support and the test harness that already exist.
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
-| **0. Baseline** | `tools/bench_audition.py` (done). Add `t_cmd`/`t_out` timing to the v1 player and run on real hardware (macOS + Linux). | Recorded baseline p50/p95 on two machines. |
+| **0. Baseline** | `tools/bench_audition.py` (done). `tools/audition_latency.py` measures `play()` → first audible buffer on a real device (done). Run both on real hardware (macOS + Linux). | Recorded baseline p50/p95 on two machines. |
 | **1. Python engine re-architecture (option A)** | Persistent stream, streaming reader, full cache for ≤ 10 s, focus prefetch, fades, async pause, vectorised envelope, single decode | p95 ≤ 40 ms warm; no clicks; existing tests green |
+| ↳ *1a (done)* | `audio/stream_output.py` (persistent stream at device rate, TUI only), `audio/mixer.py` (2–3 voices, 3 ms fades), `audio/resample.py` (soxr, linear fallback), `audio/decode_cache.py` (shared byte-bounded LRU, in-flight dedupe, ±3-row prefetch), vectorised envelope | Unit-tested headless; awaiting real-device numbers |
+| ↳ *1b (next)* | Streaming reader for long files (start after the first block; today the whole file is decoded, and resampled when rates differ) | 240 s stem starts in ≤ 40 ms |
 | **2. Peaks and analysis at scan time** | `sample_analysis` table and migration, peak pyramid, LUFS, lazy backfill | Waveform shows in under 5 ms after focus |
 | **3. Rust engine spike** | `engine/` workspace, cpal + symphonia (wav/aiff/flac/mp3) + rubato + rtrb, PyO3 binding, `NullBackend` tests, one-platform wheel | Meets §2 targets on one machine; clippy clean; callback allocation-free under `assert_no_alloc` |
 | **4. Rust engine productised** | `sample-manager-engine` abi3 wheel matrix, `[native]` extra, fallback logic, `play_pcm` bridge for non-native formats, `engine bench`, settings | Wheels for all 5 targets; automatic fallback verified; every v1 format still plays |

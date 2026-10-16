@@ -12,7 +12,7 @@ import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Iterable, Protocol
 
 from .decode import DecodedAudio, decode
 
@@ -137,6 +137,17 @@ class AudioPlayer:
         with self._lock:
             if self._is_current(generation):
                 self._position_frames = stopped_at
+
+    def prefetch(self, paths: Iterable[Path]) -> None:
+        """Warm the decoder for likely next auditions, when it supports that."""
+        prefetch = getattr(self._decoder, "prefetch", None)
+        if prefetch is not None and not self._closed:
+            prefetch(paths)
+
+    def engine_stats(self) -> dict:
+        """Return output diagnostics (latency, xruns) when the output reports them."""
+        stats = getattr(self._output, "stats", None)
+        return stats() if stats is not None else {}
 
     def snapshot(self) -> PlaybackSnapshot:
         """Return an immutable view of the current playback state."""
