@@ -11,8 +11,11 @@ reported output latency). After one warm-up audition, which also opens the
 persistent stream and is reported separately, two passes run over the rest:
 
 * ``cold``: every file is decoded on demand, the first time it is heard.
-* ``cached``: every file is already in the decode cache, which is what the
-  TUI's neighbour prefetch achieves while you move through a folder.
+  Files of 10 s or more stream instead, starting after their first block.
+* ``cached``: short files are already in the decode cache, which is what the
+  TUI's neighbour prefetch achieves while you move through a folder. Long
+  files stream again, as they do in the TUI until their waveform has been
+  decoded.
 
 This needs a real output device, so run it on your own machine. Turn the
 volume down: it plays short excerpts of each file.
@@ -32,6 +35,7 @@ from sample_manager.audio.decode import AUDIOREAD_EXTS, SOUNDFILE_EXTS  # noqa: 
 from sample_manager.audio.decode_cache import DecodeCache  # noqa: E402
 from sample_manager.audio.player import AudioPlayer, PlaybackStatus  # noqa: E402
 from sample_manager.audio.stream_output import StreamingSoundDeviceOutput  # noqa: E402
+from sample_manager.audio.streaming import PlaybackSources  # noqa: E402
 
 _EXTENSIONS = SOUNDFILE_EXTS | AUDIOREAD_EXTS
 
@@ -101,7 +105,7 @@ def main() -> None:
     # The cold pass fills the cache; the cached pass then measures cache hits,
     # the state neighbour prefetch keeps the TUI in.
     cache = DecodeCache()
-    player = AudioPlayer(decoder=cache, output=output)
+    player = AudioPlayer(decoder=PlaybackSources(cache), output=output)
     try:
         warmup = _audition(player, files[0])
         time.sleep(args.gap)

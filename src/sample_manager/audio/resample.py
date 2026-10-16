@@ -27,13 +27,15 @@ def conform(samples, source_rate: int, target_rate: int, channels: int):
     pcm = np.asarray(samples, dtype="float32")
     if pcm.ndim == 1:
         pcm = pcm[:, None]
-    pcm = _map_channels(np, pcm, channels)
+    pcm = map_channels(pcm, channels)
     if source_rate != target_rate and pcm.shape[0]:
         pcm = _resample(np, pcm, source_rate, target_rate)
     return np.ascontiguousarray(pcm, dtype="float32")
 
 
-def _map_channels(np, pcm, channels: int):
+def map_channels(pcm, channels: int):
+    """Map 2-D float32 PCM onto *channels* output channels."""
+    np = require("numpy")
     source_channels = pcm.shape[1]
     if source_channels == channels:
         return pcm
@@ -61,3 +63,21 @@ def _resample(np, pcm, source_rate: int, target_rate: int):
         [np.interp(positions, source_index, pcm[:, channel]) for channel in range(pcm.shape[1])],
         axis=1,
     ).astype("float32")
+
+
+class StreamResampler:
+    """Chunked soxr resampler that keeps filter state across blocks."""
+
+    def __init__(self, source_rate: int, target_rate: int, channels: int) -> None:
+        soxr = require("soxr")
+        self._stream = soxr.ResampleStream(
+            source_rate, target_rate, channels, dtype="float32", quality="HQ"
+        )
+
+    def process(self, pcm, *, last: bool):
+        return self._stream.resample_chunk(pcm, last=last)
+
+
+def can_stream_resample() -> bool:
+    """Chunked conversion needs soxr; without it sources are converted whole."""
+    return is_available("soxr")

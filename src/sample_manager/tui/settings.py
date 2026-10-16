@@ -63,6 +63,7 @@ def build_tui_player(preferences: TuiPreferences):
     from ..audio.decode_cache import shared_decode_cache
     from ..audio.sounddevice_output import NullOutput
     from ..audio.stream_output import StreamingSoundDeviceOutput
+    from ..audio.streaming import PlaybackSources
 
     if preferences.audio_output == "disabled":
         output = NullOutput()
@@ -72,4 +73,4 @@ def build_tui_player(preferences: TuiPreferences):
             if preferences.audio_output.startswith("device:") else None
         )
         output = StreamingSoundDeviceOutput(device=device)
-    return AudioPlayer(decoder=shared_decode_cache(), output=output)
+    return AudioPlayer(decoder=PlaybackSources(shared_decode_cache()), output=output)

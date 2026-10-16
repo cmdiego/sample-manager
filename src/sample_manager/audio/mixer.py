@@ -21,7 +21,13 @@ _MAX_VOICES = 3
 
 @dataclass(eq=False)
 class Voice:
-    """One source being rendered; ``pcm`` is already in the device format."""
+    """One source being rendered; ``pcm`` is already in the device format.
+
+    A streaming voice is created before its buffer is complete: a fill thread
+    writes ``pcm`` in order, then publishes progress through ``filled`` and
+    sets ``complete`` after the last block. The mixer only reads frames below
+    ``filled`` and does not report completion until ``complete`` is set.
+    """
 
     token: int
     pcm: object  # numpy float32 array of shape (frames, channels)
@@ -30,10 +36,13 @@ class Voice:
     target: float = 1.0
     stopping: bool = False
     first_render_at: float | None = field(default=None)
+    filled: int | None = None  # frames of pcm written; None means all of pcm
+    complete: bool = True
+    starved: int = 0  # renders that ran out of filled frames before the end
 
     @property
     def frames(self) -> int:
-        return int(self.pcm.shape[0])
+        return int(self.pcm.shape[0]) if self.filled is None else self.filled
 
 
 class Mixer:
@@ -71,7 +80,13 @@ class Mixer:
         now = None
         finished: list[Voice] = []
         for voice in self._voices:
-            count = min(frames, voice.frames - voice.cursor)
+            # Read completeness before the fill level: the fill thread sets
+            # ``complete`` only after publishing its final ``filled`` value.
+            complete = voice.complete
+            available = voice.frames
+            count = min(frames, available - voice.cursor)
+            if count < frames and not complete and not voice.stopping:
+                voice.starved += 1
             if count > 0:
                 chunk = voice.pcm[voice.cursor:voice.cursor + count]
                 if voice.gain == voice.target:
@@ -87,7 +102,7 @@ class Mixer:
                     voice.first_render_at = now
                 voice.cursor += count
             silent = voice.stopping and voice.gain <= 0.0
-            if silent or voice.cursor >= voice.frames:
+            if silent or (complete and voice.cursor >= available):
                 finished.append(voice)
         for voice in finished:
             self._voices.remove(voice)

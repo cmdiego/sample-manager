@@ -5,7 +5,8 @@ on first use and keeps it open, rendering silence while idle. Each ``start``
 conforms the decoded source to the device format (off the audio thread) and
 hands it to the :class:`~sample_manager.audio.mixer.Mixer`, which crossfades
 from whatever is sounding. ``pause`` only posts a fade-out command, so callers
-never wait on device I/O.
+never wait on device I/O. A :class:`~sample_manager.audio.streaming.StreamingSource`
+starts after its first converted block and fills the rest in the background.
 
 The TUI uses this adapter. The Qt GUI keeps the v1
 :class:`~sample_manager.audio.sounddevice_output.SoundDeviceOutput` until the
@@ -19,9 +20,10 @@ import time
 from typing import Callable
 
 from .backends import require
-from .decode import DecodedAudio
+from .decode import DecodedAudio, decode
 from .mixer import Mixer, Voice
-from .resample import conform
+from .resample import can_stream_resample, conform
+from .streaming import StreamFill, StreamingSource
 
 # Output buffering requested from PortAudio. The callback is Python and needs
 # the GIL, so it must absorb UI-thread stalls of a few milliseconds.
@@ -56,6 +58,7 @@ class StreamingSoundDeviceOutput:
         self._last_voice: Voice | None = None
         self._xruns = 0
         self._last_conformed = None
+        self._fill: StreamFill | None = None
         self._closed = threading.Event()
         self._events_thread: threading.Thread | None = None
 
@@ -63,38 +66,70 @@ class StreamingSoundDeviceOutput:
 
     def start(
         self,
-        audio: DecodedAudio,
+        audio: DecodedAudio | StreamingSource,
         start_frame: int,
         on_complete: Callable[[], None],
     ) -> None:
         with self._lock:
             mixer = self._ensure_stream()
-        pcm = self._conformed_pcm(audio, mixer)
-        ratio = mixer.sample_rate / audio.sample_rate
-        device_frames = int(pcm.shape[0])
-        cursor = max(0, min(round(int(start_frame) * ratio), device_frames))
-        with self._lock:
             self._next_token += 1
-            voice = Voice(token=self._next_token, pcm=pcm, cursor=cursor)
+            token = self._next_token
+        if (
+            isinstance(audio, StreamingSource)
+            and audio.sample_rate != mixer.sample_rate
+            and not can_stream_resample()
+        ):
+            # Chunked conversion needs soxr; convert the whole file instead.
+            audio = decode(audio.path)
+
+        fill = None
+        if isinstance(audio, StreamingSource):
+            fill = StreamFill(
+                audio,
+                start_frame,
+                token=token,
+                device_rate=mixer.sample_rate,
+                device_channels=mixer.channels,
+            )
+            fill.fill_first_block()
+            voice, ratio = fill.voice, fill.ratio
+        else:
+            pcm = self._conformed_pcm(audio, mixer)
+            ratio = mixer.sample_rate / audio.sample_rate
+            device_frames = int(pcm.shape[0])
+            cursor = max(0, min(round(int(start_frame) * ratio), device_frames))
+            voice = Voice(token=token, pcm=pcm, cursor=cursor)
+
+        with self._lock:
+            previous_fill = self._fill
+            self._fill = fill
             # Only the newest voice can complete; superseded ones fade out.
             self._callbacks = {voice.token: on_complete}
             self._current = voice
             self._last_voice = voice
             self._ratio = ratio
             self._started_at = time.perf_counter()
+        if previous_fill is not None:
+            previous_fill.cancel()
         # Starting at the top of a sample keeps its transient intact; resuming
         # or seeking mid-file fades in to avoid a click.
-        mixer.play(voice, fade_in=cursor > 0)
+        mixer.play(voice, fade_in=voice.cursor > 0)
+        if fill is not None:
+            fill.start_background()
 
     def pause(self) -> int:
         with self._lock:
             voice = self._current
             self._current = None
+            fill = self._fill
+            self._fill = None
             if voice is not None:
                 self._position = self._source_frames(voice)
                 self._callbacks.pop(voice.token, None)
             mixer = self._mixer
             position = self._position
+        if fill is not None:
+            fill.cancel()
         if voice is not None and mixer is not None:
             mixer.stop(voice)
         return position
@@ -111,6 +146,13 @@ class StreamingSoundDeviceOutput:
             self._mixer = None
             self._current = None
             self._callbacks = {}
+            fill = self._fill
+            self._fill = None
+        if fill is not None:
+            fill.cancel()
+            # A block takes milliseconds; waiting lets the fill release its
+            # file and resampler before the interpreter shuts down.
+            fill.join(timeout=1.0)
         self._closed.set()
         if stream is not None:
             stream.stop()
@@ -134,6 +176,7 @@ class StreamingSoundDeviceOutput:
             "channels": mixer.channels if mixer else None,
             "output_latency_s": _stream_latency(stream),
             "xruns": self._xruns,
+            "last_starved_renders": voice.starved if voice is not None else 0,
             "last_start_at": started_at,
             "last_first_render_at": first,
             "last_start_to_render_s": (
