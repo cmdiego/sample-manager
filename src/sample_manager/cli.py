@@ -204,12 +204,16 @@ def scan(
     fast: bool = typer.Option(
         False, "--fast", help="Skip files with unchanged mtime and size"
     ),
+    analyze: bool = typer.Option(
+        False, "--analyze", help="Also compute waveforms and loudness for new or changed samples"
+    ),
 ):
     """
     Scan a library root directory for audio samples.
 
     Walks the directory tree, filters by common audio extensions,
-    and persists sample metadata to the database.
+    and persists sample metadata to the database. With --analyze, the
+    waveform peaks and loudness of new or changed samples are stored too.
     """
     from . import scanner as scanner_module
 
@@ -223,6 +227,8 @@ def scan(
             f"(inserted: {result.inserted}, updated: {result.updated}, "
             f"skipped: {result.skipped}, pruned: {result.pruned})"
         )
+        if analyze:
+            _run_analysis(db, library_root_id=result.library_root_id, force=False)
     except FileNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
@@ -232,6 +238,51 @@ def scan(
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(exit_codes.ERROR_GENERAL)
+    finally:
+        db.close()
+
+
+def _run_analysis(db: Db, *, library_root_id: int | None, force: bool) -> None:
+    from .services.sample_analysis import backfill_analysis
+
+    result = backfill_analysis(db, library_root_id=library_root_id, force=force)
+    typer.echo(
+        f"Analyzed {result.analyzed} samples "
+        f"(up to date: {result.skipped}, failed: {result.failed})"
+    )
+
+
+@app.command()
+def analyze(
+    path: Optional[str] = typer.Argument(
+        None, help="Library root to analyze (default: every indexed root)"
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Recompute samples whose analysis is already current"
+    ),
+):
+    """
+    Store waveform peaks and loudness for indexed samples.
+
+    Only samples without a current analysis are decoded unless --force is
+    given. The TUI reads these waveforms instead of decoding on focus.
+    """
+    from .repos.library_root_repo import LibraryRootRepo
+
+    db = _get_db()
+    try:
+        library_root_id = None
+        if path is not None:
+            root = Path(path).resolve()
+            row = next(
+                (r for r in LibraryRootRepo(db).list_all() if Path(r["path"]) == root),
+                None,
+            )
+            if row is None:
+                typer.echo(f"Error: not an indexed library root: {path}", err=True)
+                raise typer.Exit(exit_codes.ERROR_INVALID_ARGS)
+            library_root_id = row["id"]
+        _run_analysis(db, library_root_id=library_root_id, force=force)
     finally:
         db.close()
 

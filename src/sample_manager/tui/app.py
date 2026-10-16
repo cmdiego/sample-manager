@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -16,6 +17,7 @@ from textual.widgets import Footer, Static
 
 from ..audio import AudioPlayer, PlaybackStatus, WaveformData, WaveformService
 from ..audio.decode_cache import shared_decode_cache
+from ..services.sample_analysis import StoredWaveformService, backfill_analysis
 from ..config import (
     add_library_root, ensure_config_exists, get_config_path, load_config,
     normalize_config, save_config,
@@ -43,6 +45,9 @@ from .widgets.top_display import TopDisplayWidget
 
 # Rows on each side of the cursor decoded ahead of time.
 PREFETCH_NEIGHBORS = 3
+# Sleep between files during the post-scan analysis backfill, so it leaves
+# the GIL to the Python audio callback.
+ANALYSIS_BACKFILL_PAUSE_SECONDS = 0.005
 
 
 def _open_db(config_path: Path | None = None) -> Db | None:
@@ -108,7 +113,7 @@ class SampleManagerApp(App):
         )
         self._waveform_service = (
             waveform_service if waveform_service is not None
-            else WaveformService(decoder=shared_decode_cache())
+            else StoredWaveformService(decoder=shared_decode_cache())
         )
         self._db: Db | None = None
         self._data: TuiDataSource | None = None
@@ -120,6 +125,7 @@ class SampleManagerApp(App):
         self._stage_focused_index = 0
         self._scan_in_progress = False
         self._scan_message = ""
+        self._analysis_cancel = threading.Event()
         self._audio_poll_timer = None
         # Typeahead filter state
         self._filter_active: bool = False
@@ -162,6 +168,7 @@ class SampleManagerApp(App):
         if not self._preferences_supplied:
             self._apply_preferences(load_tui_preferences(self._config_path), persist=False)
         self._db = _open_db(self._config_path) if self._config_path else _open_db()
+        self._bind_analysis_database()
         if self._db is None:
             self._set_status("  F4 Add Folder to start your sample library · F2 Settings · q Quit")
             return
@@ -194,7 +201,11 @@ class SampleManagerApp(App):
         if self._audio_poll_timer is not None:
             self._audio_poll_timer.stop()
         self._state = None
+        self._analysis_cancel.set()
         self._audio_player.close()
+        close_waveforms = getattr(self._waveform_service, "close", None)
+        if close_waveforms is not None:
+            close_waveforms()
         if self._db is not None:
             self._db.close()
             self._db = None
@@ -275,6 +286,7 @@ class SampleManagerApp(App):
                 self._db = _open_db(config_path)
                 if self._db is None:
                     raise ValueError("Set db_path in configuration before adding a folder")
+                self._bind_analysis_database()
                 self._data = TuiDataSource(self._db)
             self._start_library_scan(root, activate=True)
         except Exception as exc:  # noqa: BLE001 - show configuration/storage errors in the TUI
@@ -321,10 +333,49 @@ class SampleManagerApp(App):
                 f"{result.updated} updated, {result.pruned} removed"
             )
             self.notify(self._scan_message, timeout=8)
+            self._start_analysis_backfill(result.library_root_id)
         finally:
             self._scan_in_progress = False
             if self.is_running:
                 self._set_status(self._build_status() if self._state else self._scan_message)
+
+    # ── scan-time analysis ─────────────────────────────────────────────────
+
+    def _bind_analysis_database(self) -> None:
+        """Point DB-backed waveforms at the open database, when supported."""
+        bind = getattr(self._waveform_service, "bind_database", None)
+        if bind is not None:
+            bind(self._db.path if self._db is not None else None)
+
+    def _start_analysis_backfill(self, library_root_id: int) -> None:
+        """Analyse new and changed samples after a scan, off the UI thread."""
+        if self._db is None or not hasattr(self._waveform_service, "bind_database"):
+            return
+        self.run_worker(
+            self._backfill_analysis(self._db.path, library_root_id),
+            name="analysis-backfill", group="analysis-backfill", exclusive=True,
+            exit_on_error=False,
+        )
+
+    async def _backfill_analysis(self, db_path: str, library_root_id: int) -> None:
+        def run():
+            with Db(db_path) as worker_db:
+                return backfill_analysis(
+                    worker_db,
+                    library_root_id=library_root_id,
+                    cancel=self._analysis_cancel,
+                    pause_seconds=ANALYSIS_BACKFILL_PAUSE_SECONDS,
+                )
+
+        try:
+            result = await asyncio.to_thread(run)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:  # noqa: BLE001 - analysis is optional; browsing keeps working
+            self.notify(f"Sample analysis failed: {exc}", severity="warning", timeout=8)
+            return
+        if result.analyzed and self.is_running:
+            self.notify(f"Analyzed {result.analyzed} samples", timeout=4)
 
     def _activate_added_library(self, root: Path) -> None:
         """Select a completed scan and persist the same root for the next launch."""

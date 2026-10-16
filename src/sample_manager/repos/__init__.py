@@ -13,6 +13,7 @@ from .tag_repo import TagRepo
 from .tag_alias_repo import TagAliasRepo
 from .sample_tag_repo import SampleTagRepo
 from .tag_parent_repo import TagParentRepo
+from .sample_analysis_repo import SampleAnalysisRepo
 
 __all__ = [
     "LibraryRootRepo",
@@ -25,4 +26,5 @@ __all__ = [
     "TagAliasRepo",
     "SampleTagRepo",
     "TagParentRepo",
+    "SampleAnalysisRepo",
 ]
