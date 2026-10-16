@@ -1,13 +1,13 @@
 # Sample Manager v2: Design and Concepts
 
-Status: draft for discussion · Reference project: [musikcube](https://github.com/clangen/musikcube)
+Status: accepted direction (decisions in §8) · Reference project: [musikcube](https://github.com/clangen/musikcube)
 
 v2 has two goals, in priority order:
 
 1. **Audition latency.** A sample should be heard right after the key press,
    with no clicks or dropouts while the UI is busy. The design decides how much
-   of the playback engine should move to native code (C++), and what that move
-   costs.
+   of the playback engine should move to native code, and what that move
+   costs. The native engine is written in **Rust** (§3, §8).
 2. **A more modern TUI**, using musikcube's layout and interaction ideas while
    keeping the keyboard model that v1 users already know.
 
@@ -94,7 +94,10 @@ frames at 48 kHz ≈ 5–11 ms, then a 2 ms fade-in.
 
 ---
 
-## 3. The C++ question: what native code buys and what it costs
+## 3. The native-engine question: what it buys and what it costs
+
+This section was first written as a C++ evaluation. The analysis applies to
+any native language. The comparison at the end led to choosing **Rust**.
 
 ### Where native code helps
 
@@ -109,36 +112,37 @@ frames at 48 kHz ≈ 5–11 ms, then a 2 ms fade-in.
 ### Where it does not help
 
 - Decoding is **already native**: libsndfile runs underneath `soundfile`.
-  Rewriting the decode call in C++ gains almost nothing.
+  Rewriting the decode call in native code gains almost nothing.
 - Persistent streams, head caching, a single shared decode, and vectorisation
   are **design changes**. Python can do all of them.
-- UI responsiveness depends on Textual rendering. A C++ engine does not
+- UI responsiveness depends on Textual rendering. A native engine does not
   change that.
 
-### Costs of a native engine
+### Costs of a native engine (with the Rust mitigations)
 
 | Cost                     | Notes and mitigation |
 |--------------------------|----------------------|
-| Build and distribution   | Wheels for macOS arm64/x86_64, Linux x86_64/aarch64 and Windows. Use `scikit-build-core` and `cibuildwheel` in CI. This is the largest ongoing cost. |
-| Contributor barrier      | Two languages and two toolchains. Keep the engine small (target ≤ 2–3k LOC) with a stable interface, so most work stays in Python. |
-| Crash surface            | A segfault takes down the whole app. Use ASan/UBSan in CI and fuzz the decoders. Use few dependencies (miniaudio and dr_libs are single-header C libraries that are widely used). |
+| Build and distribution   | Wheels for macOS arm64/x86_64, Linux x86_64/aarch64 and Windows. With Rust: `maturin` builds **abi3** wheels (`abi3-py310`), so there is one wheel per platform for every Python version from 3.10 up, not one per Python version. `PyO3/maturin-action` builds the matrix in CI. This is still the largest ongoing cost, but a much smaller one than with C++. |
+| Contributor barrier      | Two languages and two toolchains. Keep the engine small (target ≤ 2–3k LOC) with a stable interface, so most work stays in Python. The engine ships as a separate optional package, so contributors working only in Python never need `cargo`. |
+| Crash surface            | Safe Rust rules out the use-after-free and out-of-bounds bugs that a C++ engine would need ASan/fuzzing to catch. `unsafe` stays at the PyO3/cpal edges. A Rust panic becomes a Python exception at the binding boundary. In the audio callback, panics are caught with `catch_unwind`: the callback outputs silence and reports an `error` event, so a bad file cannot kill the app. |
 | Debugging                | Engine logs go to a lock-free ring that Python drains, plus the `sampleman engine bench` / `engine stats` commands. |
-| **Cost of each FFI call** | **Small, if the interface is designed well.** One nanobind or C-ABI call costs on the order of 0.1–1 µs. At command rate (key presses, ≤ 100/s) that is negligible. Calls become expensive only when they happen **per buffer**. Rule: Python never passes PCM data and never runs inside the callback. |
+| **Cost of each FFI call** | **Small, if the interface is designed well.** One PyO3 call costs on the order of 0.1–1 µs. At command rate (key presses, ≤ 100/s) that is negligible. Calls become expensive only when they happen **per buffer**. Rule: Python never passes PCM data per buffer and never runs inside the callback. |
 
 ### Options compared
 
 | Option | What it is | Latency ceiling | Cost | Verdict |
 |---|---|---|---|---|
 | **A. Python, re-architected** | Persistent stream, streaming reader, head cache, single decode, fades | Limited by the GIL; needs ~512–1024-frame buffers (11–21 ms of buffering, plus jitter) | Low | **Do first.** Most of the gain at low cost, and it is the fallback in every later phase. |
-| **B. C++ engine in-process** | miniaudio + dr_libs/libsndfile, C ABI, nanobind wrapper | Meets all §2 targets | Medium | **Recommended target.** This is musikcube's model, reduced to what we need. |
-| C. Rust engine in-process | cpal + symphonia, PyO3 + maturin | Same as B | Medium (maturin makes wheels easier; memory safety) | Equal technically. Choose it instead of B if the maintainers prefer Rust. |
-| D. Engine as a separate process | B or C behind a local socket, like musikcube's `server` plugin | Same as B, plus about 0.1 ms for IPC | Higher | Postpone. Worth it only if the GUI, TUI and CLI should share one live engine. |
+| B. C++ engine in-process | miniaudio + dr_libs/libsndfile, C ABI, nanobind wrapper | Meets all §2 targets | Medium | Not chosen. |
+| **C. Rust engine in-process** | cpal + symphonia + rubato, PyO3 + maturin | Same as B | Medium (abi3 wheels make packaging easier; memory safety) | **Chosen.** This is musikcube's model, reduced to what we need, in a memory-safe language. |
+| D. Engine as a separate process | C behind a local socket, like musikcube's `server` plugin | Same as C, plus about 0.1 ms for IPC | Higher | Postponed. Worth it only if the GUI, TUI and CLI should share one live engine. |
 
-**Recommendation:** ship option A in v2.0-alpha. It is measurable, cheap, and
-needs no toolchain changes. Then build option B behind the **existing
-`AudioPlayer`/`AudioOutput` ports**, so Textual, Qt and the tests do not change.
-Make B the default only once it beats A on the §2 metrics on real hardware.
-Keep A as the automatic fallback when the extension cannot be imported.
+**Plan:** ship option A in v2.0-alpha. It is measurable, cheap, and needs no
+toolchain changes. Then build option C behind the **existing
+`AudioPlayer`/`AudioOutput` ports**, so Textual and the tests do not change.
+Make C the default only once it beats A on the §2 metrics on real hardware.
+Keep A as the automatic fallback when the extension is not installed or cannot
+be imported.
 
 ---
 
@@ -153,15 +157,15 @@ these relevant parts:
 |----------------------------------------------|------------------------------------------------------|---------------|
 | `audio/Player`, `Stream`, `Buffer`           | Decoding into pooled buffers on a separate thread from output | `Voice`, `SourceReader`, `BlockPool` |
 | `GaplessTransport`, `Crossfader`             | A transport that owns several players and their fades | `AuditionTransport`: 2 voices, 2–5 ms micro-fades, voice stealing |
-| Output plugins (`alsaout`, `pulseout`, `pipewireout`, `wasapiout`, `coreaudioout`, `portaudioout`, `nullout`…) | Interchangeable outputs, including a null output | One dependency, **miniaudio**, which covers the same backends. `NullOutput` stays for tests. |
+| Output plugins (`alsaout`, `pulseout`, `pipewireout`, `wasapiout`, `coreaudioout`, `portaudioout`, `nullout`…) | Interchangeable outputs, including a null output | One dependency, **cpal** (ALSA, which also reaches PulseAudio/PipeWire; CoreAudio; WASAPI; JACK optional). An engine-internal `NullBackend` drives the same mixer from a timer thread, for tests and for headless use. |
 | `PlaybackService` above the transport        | App-level service separate from the real-time engine | Python `AuditionService` (queue, focus prefetch, settings) |
 | `Visualizer`, DSP plugins (`supereqdsp`)     | Post-mix taps                                         | Peak/RMS meter tap, later pitch/tempo DSP |
-| `musikcore_c.h` / SDK headers                | **A stable C interface** as the language boundary     | `sm_engine.h`: a C ABI that nanobind (or ctypes) wraps |
+| `musikcore_c.h` / SDK headers                | **A stable, narrow interface** as the language boundary | The `sm-engine` crate API, exposed to Python by a thin PyO3 crate. A C ABI (`cbindgen`) is added only if a non-Python consumer appears. |
 | `server` plugin (WebSocket remote)           | Remote control of the engine                          | Option D, later |
 | `cursespp` layouts, shortcut bar, JSON themes | Switchable layouts, a persistent status bar, theme files | §6 |
 
 What we **do not** copy: gapless playback and playlists, the per-OS output
-plugin binaries, and a C++ UI. musikcube's UI is C++ because the whole
+plugin binaries, the C++ implementation language, and a native UI. musikcube's UI is C++ because the whole
 application is. Sample Manager's UI is Python and stays in Python.
 
 ---
@@ -171,28 +175,44 @@ application is. Sample Manager's UI is Python and stays in Python.
 ### 5.1 Threads and data flow
 
 ```
- Python (UI / services)                Native engine (no GIL)
+ Python (UI / services)                Rust engine: sm-engine (no GIL)
  ─────────────────────                 ─────────────────────────────────────────
- AuditionService ──cmd──▶ SPSC command queue ──▶ Control thread
-   play(id, path)                                 │ resolves path → cache / reader
+ AuditionService ──cmd──▶ crossbeam channel ──▶ Control thread
+   play(token, path)                              │ resolves path → cache / reader
    prefetch([paths])                              ▼
-   pause / seek / stop                    Decoder pool (1–2 threads)
+   pause / seek / stop                    Decoder pool (1–2 threads, symphonia)
                                             stream header + head block first
- poll() @30 Hz ◀── atomic snapshot ◀──┐    resample to device rate (if needed)
- events()      ◀── SPSC event queue ◀─┤    fill BlockPool / HeadCache
-                                      │           │ lock-free ring per Voice
+ poll() @30 Hz ◀── seqlock snapshot ◀─┐    resample to device rate (rubato)
+ events()      ◀── rtrb event ring ◀──┤    fill BlockPool / HeadCache
+                                      │           │ rtrb SPSC ring per Voice
                                       │           ▼
-                                      └── RT callback (miniaudio, persistent stream)
+                                      └── RT callback (cpal, persistent stream)
                                             mix ≤2 voices · micro-fade · meter tap
                                             no locks · no alloc · no I/O · no GIL
 ```
 
+Recommended crates:
+
+| Concern | Crate | Why |
+|---|---|---|
+| Device output | `cpal` | Pure Rust host abstraction over ALSA/CoreAudio/WASAPI/JACK. |
+| Decoding | `symphonia` with features `wav`, `aiff`, `flac`, `pcm`, `mp3` | Pure Rust, no system libraries, seekable streaming readers. MP3 is the only compressed format (§8). |
+| Sample-rate conversion | `rubato` | Sinc/FFT resamplers that run in the decoder thread, never in the callback. |
+| Real-time queues | `rtrb` | Wait-free SPSC ring buffers between the decoder threads, the callback and the event queue. |
+| Control queue | `crossbeam-channel` | Not real-time. Simple MPSC from Python into the control thread. |
+| Allocation guard | `assert_no_alloc` (debug and test builds) | Fails the test suite if the callback ever allocates. |
+| Python binding | `pyo3` (abi3-py310) + `maturin` | One wheel per platform for all supported Python versions. |
+
 ### 5.2 Key mechanisms
 
-- **Persistent device stream.** Open the stream once at the device's native
-  rate and keep it open, outputting silence when idle. Changing the output
-  device swaps the stream in place. This removes v1's per-file stream
-  open/close.
+- **Persistent device stream at the device rate (decided).** Open the stream
+  once at the device's native rate and keep it open, outputting silence when
+  idle. Every source is resampled to that rate in the decoder thread. When the
+  file rate already matches, the resampler is bypassed and samples pass
+  through unchanged, apart from fades and gain. There is no per-file stream
+  reopen and no bit-exact mode. Changing the output device swaps the stream in
+  place and flushes the resampled cache entries. This removes v1's per-file
+  stream open/close.
 - **Streaming source reader.** Read the header and the first block (about
   0.1 ms in the measurements above), start playback, and let the decoder stay
   ahead by about 200 ms. Files ≤ 10 s are decoded completely into RAM, because
@@ -213,32 +233,52 @@ application is. Sample Manager's UI is Python and stays in Python.
   latency timestamps. Python reads it at UI frame rate, so polling never
   blocks the audio.
 
-### 5.3 C interface (sketch)
+### 5.3 Engine interface (sketch)
 
-```c
-// sm_engine.h — the only boundary between Python and native code.
-typedef struct sm_engine sm_engine;
+The engine is a Cargo workspace with two crates:
 
-sm_engine* sm_engine_create(const sm_config* cfg);   // device, buffer frames, cache MB
-void       sm_engine_destroy(sm_engine*);
+- `sm-engine`: the pure Rust core. It has no Python dependency and is tested
+  with `cargo test`.
+- `sm-engine-py`: a thin PyO3 layer that builds the extension module
+  `sample_manager_engine._engine`.
 
-int  sm_play(sm_engine*, uint64_t token, const char* utf8_path, double start_s);
-int  sm_prefetch(sm_engine*, const char* const* paths, size_t count);
-int  sm_pause(sm_engine*);  int sm_resume(sm_engine*);
-int  sm_seek(sm_engine*, double seconds);
-int  sm_set_device(sm_engine*, const char* device_id);
+```rust
+// sm-engine — the only boundary the Python binding sees.
+pub struct Engine { /* control tx, snapshot reader, event consumer */ }
 
-void   sm_snapshot(const sm_engine*, sm_state* out);         // wait-free read
-size_t sm_poll_events(sm_engine*, sm_event* out, size_t max); // finished, error, xrun
-int    sm_peaks(const char* path, uint32_t buckets, float* min_out, float* max_out);
+impl Engine {
+    pub fn new(cfg: EngineConfig) -> Result<Engine, EngineError>; // device, buffer frames, cache MB
+    pub fn play(&self, token: u64, path: &Path, start_s: f64);
+    pub fn play_pcm(&self, token: u64, pcm: Arc<[f32]>, channels: u16, rate: u32); // §5.5 bridge
+    pub fn prefetch(&self, paths: &[PathBuf]);
+    pub fn pause(&self);
+    pub fn resume(&self);
+    pub fn seek(&self, seconds: f64);
+    pub fn set_device(&self, device_id: Option<&str>);
+    pub fn snapshot(&self) -> State;                    // wait-free seqlock read
+    pub fn drain_events(&self, out: &mut Vec<Event>);   // Finished, Error, Xrun, Latency
+}
+
+pub fn peaks(path: &Path, buckets: u32) -> Result<Peaks, EngineError>; // scan-time analysis
 ```
 
-All calls are non-blocking and only enqueue a command. The `token` plays the
-role of v1's `generation` counter: stale completions are ignored.
+```python
+# Python surface (from sample_manager_engine._engine), all non-blocking
+engine = Engine(device=None, buffer_frames=256, cache_mb=64)
+engine.play(token, "/abs/path.wav", 0.0)
+engine.prefetch([...]); engine.pause(); engine.resume(); engine.seek(1.5)
+state = engine.snapshot()        # frozen object: status, position, duration, token, levels, xruns
+events = engine.drain_events()   # list of small tuples
+```
+
+Every call only enqueues a command and returns. Each binding call wraps its
+work in `py.allow_threads`, so it never holds the GIL longer than the enqueue.
+The `token` plays the role of v1's `generation` counter: stale completions
+are ignored.
 
 ### 5.4 Waveforms and analysis move to scan time
 
-- During a scan, the engine's `sm_peaks` (or the vectorised NumPy fallback)
+- During a scan, the engine's `peaks()` (or the vectorised NumPy fallback)
   computes a **multi-resolution peak pyramid** (4096 → 1024 → 256 bins). It
   also records true peak, RMS/LUFS-short and duration. These are stored in
   SQLite (a `sample_analysis` table with a BLOB column) and keyed by
@@ -253,12 +293,23 @@ role of v1's `generation` counter: stale completions are ignored.
 
 - `NativeAudioPlayer` implements the same interface as `AudioPlayer`
   (`play`, `play_from_start`, `pause`, `seek`, `snapshot`, `close`), so
-  `tui/app.py` and the Qt `controller.py` do not change.
+  `tui/app.py` does not change.
 - `build_tui_player()` picks the native player when
-  `sample_manager._engine` imports. Otherwise it falls back to the improved
+  `sample_manager_engine` imports. Otherwise it falls back to the improved
   Python player. `config.yaml` gets `audio.engine: auto | native | python`.
 - Neither the UI thread nor `pause()` ever waits on device I/O. This fixes
   v1's synchronous `stream.stop()`.
+- **Formats outside the native decoder.** The engine decodes WAV, AIFF,
+  FLAC and MP3 natively. v1 also plays OGG, Opus, AAC/M4A, W64 and CAF.
+  For those, `NativeAudioPlayer` decodes once in a Python worker with the
+  existing `decode()` and passes the whole buffer to the engine with
+  `play_pcm` (one copy per audition, never per callback). v1 behaviour stays
+  intact, the engine still owns the output, and the wheel does not need
+  ffmpeg.
+- **Qt GUI (decided).** The Qt GUI keeps the v1 Python player and gets no
+  v2 changes until the TUI v2 is stable and usable (milestone 5 exit). The
+  port interface is shared, so wiring the engine into
+  `gui/controller.py` later is a small change.
 
 ### 5.6 Instrumentation
 
@@ -271,15 +322,24 @@ role of v1's `generation` counter: stale completions are ignored.
 - An optional loopback test (output wired to input) gives the true
   acoustic latency for the release notes.
 
-### 5.7 Build and packaging (option B)
+### 5.7 Build and packaging (Rust)
 
-- `engine/` directory: C++20, miniaudio, dr_wav/dr_flac/dr_mp3, and
-  libsndfile when available, for AIFF/OGG/CAF. Python binding with nanobind.
-- `scikit-build-core` backend. `cibuildwheel` on GitHub Actions builds the
-  wheel matrix. The sdist builds from source.
-- CI: unit tests in C++ (doctest), ASan/UBSan job, and a smoke test in
-  Python using miniaudio's null backend (works headless). The existing pytest
-  suite runs against both engines.
+- `engine/` is a Cargo workspace (`sm-engine`, `sm-engine-py`) with a pinned
+  toolchain in `rust-toolchain.toml`.
+- It ships as a **separate distribution**, `sample-manager-engine`, built with
+  `maturin` as abi3 wheels. The main package adds an optional extra:
+  `pip install "sample-manager[native]"`. A plain `pip install -e .` stays
+  pure Python, and the automatic fallback covers it. Once milestone 4 is
+  complete, the extra can become a default dependency on platforms that have
+  wheels.
+- Wheel matrix built with `PyO3/maturin-action`: manylinux x86_64/aarch64
+  (with `alsa-lib-devel` in the build image), macOS arm64/x86_64, Windows
+  x64. The sdist builds from source when `cargo` is available.
+- CI: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`
+  (including `assert_no_alloc` on the callback path), and `cargo miri test`
+  for the seqlock and ring modules. A Python smoke test runs against the
+  `NullBackend`, which works headless. The existing pytest suite runs
+  against both engines.
 
 ---
 
@@ -302,7 +362,7 @@ role of v1's `generation` counter: stale completions are ignored.
 6. **No change to muscle memory.** `\` leader, `j/k`, `/`, `Tab`, `Space`,
    `F1–F6` all keep their v1 meaning.
 
-We keep **Textual** rather than porting to ncurses or C++. Once audio no longer
+We keep **Textual** rather than porting to ncurses or a native UI. Once audio no longer
 needs the GIL, UI cost no longer affects audio quality. Textual also gives us
 TCSS theming, mouse support and the test harness that already exist.
 
@@ -368,28 +428,39 @@ TCSS theming, mouse support and the test harness that already exist.
 | **0. Baseline** | `tools/bench_audition.py` (done). Add `t_cmd`/`t_out` timing to the v1 player and run on real hardware (macOS + Linux). | Recorded baseline p50/p95 on two machines. |
 | **1. Python engine re-architecture (option A)** | Persistent stream, streaming reader, full cache for ≤ 10 s, focus prefetch, fades, async pause, vectorised envelope, single decode | p95 ≤ 40 ms warm; no clicks; existing tests green |
 | **2. Peaks and analysis at scan time** | `sample_analysis` table and migration, peak pyramid, LUFS, lazy backfill | Waveform shows in under 5 ms after focus |
-| **3. Native engine spike** | `sm_engine.h`, miniaudio + dr_libs, nanobind, null-backend tests, one-platform wheel | Meets §2 targets on one machine; ASan clean |
-| **4. Native engine productised** | cibuildwheel matrix, fallback logic, `engine bench`, settings | Wheels for all 5 targets; automatic fallback verified |
-| **5. TUI v2** | Neutral theme and tokens, transport bar, layout switcher, drill-down columns, inline detail | Snapshot tests for each layout; v1 keymap tests still pass |
-| **6. Later** | Pitch/tempo-matched audition, MIDI trigger, shared engine daemon (option D) | — |
+| **3. Rust engine spike** | `engine/` workspace, cpal + symphonia (wav/aiff/flac/mp3) + rubato + rtrb, PyO3 binding, `NullBackend` tests, one-platform wheel | Meets §2 targets on one machine; clippy clean; callback allocation-free under `assert_no_alloc` |
+| **4. Rust engine productised** | `sample-manager-engine` abi3 wheel matrix, `[native]` extra, fallback logic, `play_pcm` bridge for non-native formats, `engine bench`, settings | Wheels for all 5 targets; automatic fallback verified; every v1 format still plays |
+| **5. TUI v2** | Neutral theme and tokens, transport bar, layout switcher, drill-down columns, inline detail | Snapshot tests for each layout; v1 keymap tests still pass; **TUI declared stable and usable** |
+| **6. Qt GUI catch-up** | Wire `NativeAudioPlayer` into `gui/controller.py`, adopt the transport-bar concept | Starts only after milestone 5 exits |
+| **7. Later** | Pitch/tempo-matched audition, MIDI trigger, more compressed formats, shared engine daemon (option D) | — |
 
 Phases 1–2 and 5 can run in parallel. Phase 3 depends only on the port
-interface, which already exists.
+interface, which already exists. Until milestone 6, the Qt GUI gets fixes
+only.
 
 ---
 
-## 8. Open questions
+## 8. Decisions and open questions
 
-1. **C++ or Rust** for the engine? This design assumes C++ (as in musikcube,
-   with miniaudio as the core). Rust is an equally good choice and its
-   packaging is easier. Decide before phase 3.
-2. **Device sample rate vs. file rate.** Always resample to the device rate
-   (lower risk, small CPU cost), or reopen the stream when an audition needs
-   bit-exact output?
-3. **Compressed formats.** Is MP3 enough with dr_mp3, or do we still need
-   ffmpeg for AAC/M4A? (Today: `audioread`.) This affects the size of the
-   wheels.
-4. **Qt GUI.** Should it get the same engine and the same transport-bar
-   concept in v2, or stay in maintenance mode?
-5. **Prefetch I/O on slow drives** (HDD/NAS libraries). Should prefetch depth
+### Decided
+
+1. **Engine language: Rust.** The stack is cpal, symphonia, rubato, rtrb,
+   PyO3 and maturin (§5.1, §5.7). The deciding factors were memory safety in a
+   real-time, file-parsing component, and abi3 wheels shrinking the
+   packaging matrix.
+2. **Sample rate: always resample to the device rate.** The stream stays open
+   at the device's native rate. Matching rates pass through unchanged. There
+   is no bit-exact reopen mode (§5.2).
+3. **Compressed formats: MP3 only, for now.** symphonia's `mp3` feature,
+   with no ffmpeg. Other v1 formats play through the Python `play_pcm`
+   bridge (§5.5).
+4. **Qt GUI: on hold** until the TUI v2 is stable and usable. It then
+   catches up in milestone 6 (§5.5, §7).
+
+### Open
+
+1. **Prefetch I/O on slow drives** (HDD/NAS libraries). Should prefetch depth
    adapt to the measured read time?
+2. **Resampler quality preset.** Should auditions use a cheaper fast sinc
+   preset, with a higher-quality preset only for export previews? Measure CPU
+   cost on low-end hardware during the milestone 3 spike.
