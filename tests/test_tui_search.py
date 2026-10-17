@@ -68,7 +68,7 @@ def test_activation_slash_is_not_query_and_nested_hit_can_be_selected(search_app
             hits = search_app._visible_items()
             assert len(hits) == 1
             assert hits[0].path.name == "FL_FDS_09_Drum_Loop_Full_98.wave"
-            assert hits[0].context == "Funky_Disco/loops"
+            assert Path(hits[0].context) == Path("Funky_Disco") / "loops"
             text = search_app.query_one(FiltersPanel).query_one(Static).content
             assert "/Drum" not in text
             assert "1 matches" in text

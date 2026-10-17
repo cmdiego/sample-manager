@@ -527,6 +527,8 @@ class TestGetProfilesDir:
 
     def test_config_with_tilde(self, monkeypatch, tmp_path):
         monkeypatch.setenv("HOME", str(tmp_path))
+        # Windows expands ~ from USERPROFILE rather than HOME.
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         cfg = {"profiles_dir": "~/my_profiles"}
         result = get_profiles_dir(cfg)
         assert result == (tmp_path / "my_profiles").resolve()

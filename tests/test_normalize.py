@@ -59,9 +59,10 @@ class TestNormRelPath:
         result = norm_rel_path("loops/../drums/kick.wav")
         assert result == "drums/kick.wav"
 
-    def test_absolute_path_rejected(self):
+    def test_absolute_path_rejected(self, tmp_path):
         with pytest.raises(ValueError, match="absolute"):
-            norm_rel_path("/absolute/path/file.wav")
+            # A drive-qualified temporary path is absolute on Windows too.
+            norm_rel_path(tmp_path / "file.wav")
 
     def test_path_object_input(self):
         p = Path("some") / "nested" / "path.wav"
@@ -86,6 +87,8 @@ class TestNormAbsPath:
         fake_home = tmp_path / "fakehome"
         fake_home.mkdir()
         monkeypatch.setenv("HOME", str(fake_home))
+        # Windows expands ~ from USERPROFILE rather than HOME.
+        monkeypatch.setenv("USERPROFILE", str(fake_home))
         result = norm_abs_path("~/mylib")
         # Should contain the fake home path, lowercased
         assert str(fake_home).lower().replace("\\", "/") in result

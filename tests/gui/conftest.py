@@ -16,6 +16,7 @@ import pytest
 
 from sample_manager.db import Db
 from sample_manager.migrations import apply_migrations
+from sample_manager.normalize import norm_abs_path, norm_rel_path
 from sample_manager.services.library_browser import LibraryBrowserService
 
 
@@ -52,7 +53,7 @@ def populated_service(browser_db, tmp_path):
 
     browser_db.execute(
         "INSERT INTO library_root (path, path_norm) VALUES (?, ?)",
-        (str(root_dir), str(root_dir).lower()),
+        (str(root_dir), norm_abs_path(root_dir)),
     )
     root_id = browser_db.fetchval("SELECT id FROM library_root LIMIT 1")
 
@@ -65,7 +66,8 @@ def populated_service(browser_db, tmp_path):
             (
                 root_id,
                 str(rel),
-                str(rel).lower(),
+                # Match scanner keys on Windows as well as POSIX hosts.
+                norm_rel_path(rel),
                 f.name,
                 "wav",
                 f.stat().st_size,

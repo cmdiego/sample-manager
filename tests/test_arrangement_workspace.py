@@ -1,6 +1,7 @@
 """Tests for arrangement workspace service and virtual folders."""
 
 import pytest
+from pathlib import Path
 
 from sample_manager.arrangement_workspace import (
     ArrangementWorkspaceService,
@@ -465,6 +466,7 @@ class TestExportPlanningIntegration:
         # Samples in kicks folder should have "Drums/Kicks/" prefix
         ops_by_id = {op["sample_id"]: op for op in plan["operations"]}
 
-        assert ops_by_id[samples[0]]["dst_rel_path"].startswith("Drums/Kicks/")
-        assert ops_by_id[samples[1]]["dst_rel_path"].startswith("Drums/Kicks/")
+        # Export paths use the host separator unless the profile requests POSIX.
+        assert Path(ops_by_id[samples[0]]["dst_rel_path"]).parts[:2] == ("Drums", "Kicks")
+        assert Path(ops_by_id[samples[1]]["dst_rel_path"]).parts[:2] == ("Drums", "Kicks")
         assert not ops_by_id[samples[2]]["dst_rel_path"].startswith("Drums")

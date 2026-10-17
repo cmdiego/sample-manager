@@ -193,6 +193,8 @@ class TestSelectionSummary:
             yaml.safe_dump([{"name": "d", "default_dest": str(tmp_path / "exports")}], f)
 
         monkeypatch.setenv("HOME", str(tmp_path))
+        # Windows expands ~ from USERPROFILE rather than HOME.
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_path)
 
         summary = LibraryBrowserService(db).selection_summary()

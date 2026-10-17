@@ -13,11 +13,11 @@ def test_normalize_path_expands_tilde(tmp_home, monkeypatch):
     assert result.is_absolute()
 
 
-def test_normalize_path_expands_env_vars(monkeypatch):
+def test_normalize_path_expands_env_vars(monkeypatch, tmp_path):
     """Test that normalize_path expands environment variables."""
-    monkeypatch.setenv("TEST_VAR", "/custom/location")
+    monkeypatch.setenv("TEST_VAR", str(tmp_path / "custom"))
     result = config.normalize_path("$TEST_VAR/subdir")
-    assert "/custom/location/subdir" in str(result)
+    assert result == (tmp_path / "custom" / "subdir").resolve()
 
 
 def test_normalize_config_expands_db_path(tmp_home, monkeypatch):

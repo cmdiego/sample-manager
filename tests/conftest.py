@@ -13,6 +13,8 @@ def tmp_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # Windows expands ~ from USERPROFILE rather than HOME.
+    monkeypatch.setenv("USERPROFILE", str(home))
     return home
 
 
