@@ -13,6 +13,8 @@ Every test runs in a hermetic environment:
 
 Isolation approach follows the pattern established in test_arrangement_cli.py:
   monkeypatch.setenv("HOME", str(tmp_path))
+  # Windows expands ~ from USERPROFILE rather than HOME.
+  monkeypatch.setenv("USERPROFILE", str(tmp_path))
   monkeypatch.setattr(config_module, "DEFAULT_CONFIG_DIR", ...)
   monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", ...)
 """
@@ -137,6 +139,8 @@ def e2e_env(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Windows expands ~ from USERPROFILE rather than HOME.
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     config_dir = tmp_path / ".sample_manager"
     config_path = config_dir / "config.yaml"

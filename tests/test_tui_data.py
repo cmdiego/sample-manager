@@ -133,6 +133,8 @@ class TestGetActiveDestination:
             )
 
         monkeypatch.setenv("HOME", str(tmp_path))
+        # Windows expands ~ from USERPROFILE rather than HOME.
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_path)
 
         ds = TuiDataSource(db)
@@ -172,6 +174,8 @@ class TestGetActiveDestination:
             )
 
         monkeypatch.setenv("HOME", str(tmp_path))
+        # Windows expands ~ from USERPROFILE rather than HOME.
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_path)
 
         ds = TuiDataSource(db)

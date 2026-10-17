@@ -43,6 +43,8 @@ def onboarding(tmp_path, monkeypatch):
     home.mkdir()
     config_path = home / ".sample_manager" / "config.yaml"
     monkeypatch.setenv("HOME", str(home))
+    # Windows expands ~ from USERPROFILE rather than HOME.
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setattr("sample_manager.config.DEFAULT_CONFIG_PATH", config_path)
     monkeypatch.setattr("sample_manager.config.DEFAULT_CONFIG_DIR", config_path.parent)
     root = home / "Music" / "Drum Packs"

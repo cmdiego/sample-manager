@@ -162,4 +162,5 @@ def test_open_in_file_manager_opens_containing_folder(populated_service, qtbot, 
 
     window._on_open_externally(str(root / "drums" / "kick.wav"))
 
-    assert opened == [str(root / "drums")]
+    # Qt serializes Windows file URLs with forward slashes.
+    assert [Path(path) for path in opened] == [root / "drums"]

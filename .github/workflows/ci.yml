@@ -59,15 +59,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev,audio]"
           python -m pip check
-      - name: Run full regression suite
-        run: python -m pytest -ra --junitxml=test-results/pytest.xml
+      # Keep Qt's application lifetime separate from Textual/audio worker teardown.
+      - name: Run CLI, audio and TUI regression suite
+        run: python -m pytest -ra --ignore=tests/gui --junitxml=test-results/core.xml
+      - name: Run offscreen Qt regression suite
+        if: success() || failure()
+        run: python -m pytest -ra tests/gui --junitxml=test-results/gui.xml
       # Keep failures inspectable without depending on log retention or reruns.
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tests-${{ matrix.os }}-python-${{ matrix.python }}
-          path: test-results/pytest.xml
+          path: test-results/*.xml
           if-no-files-found: ignore
 
   package:
