@@ -89,3 +89,29 @@ def test_render_waveform_has_stable_dimensions_and_cursor():
     assert len(lines) == 3
     assert all(len(line) == 8 for line in lines)
     assert all(line[4] == "│" for line in lines)
+
+
+def _reference_envelope(samples, bucket_count):
+    """The original per-bucket loop, kept to pin vectorised behaviour."""
+    values = np.asarray(samples, dtype="float64")
+    count = min(bucket_count, int(values.shape[0]))
+    edges = np.linspace(0, values.shape[0], count + 1, dtype=int)
+    return tuple(
+        WaveformBin(
+            minimum=max(-1.0, min(1.0, float(np.min(values[edges[i]:edges[i + 1]])))),
+            maximum=max(-1.0, min(1.0, float(np.max(values[edges[i]:edges[i + 1]])))),
+        )
+        for i in range(count)
+    )
+
+
+@pytest.mark.parametrize("shape,buckets", [((1000,), 64), ((997, 2), 100), ((50, 3), 50), ((7, 1), 4096)])
+def test_vectorised_envelope_matches_reference(shape, buckets):
+    rng = np.random.default_rng(1)
+    samples = (rng.random(shape, dtype="float32") * 2.4 - 1.2).astype("float32")
+    actual = compute_waveform_envelope(samples, buckets)
+    expected = _reference_envelope(samples, buckets)
+    assert len(actual) == len(expected)
+    for got, want in zip(actual, expected):
+        assert got.minimum == pytest.approx(want.minimum)
+        assert got.maximum == pytest.approx(want.maximum)

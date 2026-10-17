@@ -149,3 +149,51 @@ def analyze(path) -> AudioFeatures:
         peak=compute_peak(decoded.samples),
         rms=compute_rms(decoded.samples),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Scan-time analysis (v2 milestone 2)
+# --------------------------------------------------------------------------- #
+
+# Bump when any stored value would change, so old rows are recomputed.
+ANALYSIS_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ScanAnalysis:
+    """Everything stored in ``sample_analysis`` for one decoded file.
+
+    ``pyramid`` holds signed min/max envelopes, finest level first (see
+    :mod:`sample_manager.audio.peaks`). Loudness values are ``None`` for
+    silence.
+    """
+
+    sample_rate: int
+    channels: int
+    frames: int
+    duration_seconds: float
+    peak: float
+    rms: float
+    loudness_lufs: Optional[float]
+    short_term_max_lufs: Optional[float]
+    pyramid: tuple
+
+
+def analyze_decoded(decoded) -> ScanAnalysis:
+    """Compute the stored analysis from already-decoded audio. Pure."""
+    from .loudness import measure_loudness
+    from .peaks import compute_peak_pyramid
+
+    samples = decoded.samples
+    loudness = measure_loudness(samples, decoded.sample_rate)
+    return ScanAnalysis(
+        sample_rate=int(decoded.sample_rate),
+        channels=int(decoded.channels),
+        frames=int(decoded.frames),
+        duration_seconds=float(decoded.duration_seconds),
+        peak=compute_peak(samples),
+        rms=compute_rms(samples),
+        loudness_lufs=loudness.integrated_lufs,
+        short_term_max_lufs=loudness.short_term_max_lufs,
+        pyramid=compute_peak_pyramid(samples),
+    )

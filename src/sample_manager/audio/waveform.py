@@ -37,24 +37,31 @@ def compute_waveform_envelope(samples, bucket_count: int) -> tuple[WaveformBin, 
         raise ValueError("bucket_count must be greater than zero")
 
     np = require("numpy")
-    values = np.asarray(samples, dtype="float64")
+    values = np.asarray(samples)
     if values.ndim not in (1, 2):
         raise ValueError(f"Expected 1-D or 2-D samples, got ndim={values.ndim}")
     if values.shape[0] == 0:
         return ()
 
+    # Collapse channels per frame, then reduce each bucket in one vectorised
+    # pass. Edges are strictly increasing because count <= frames.
+    if values.ndim == 2:
+        frame_min = values[:, 0].copy()
+        frame_max = frame_min.copy()
+        for channel in range(1, values.shape[1]):
+            np.minimum(frame_min, values[:, channel], out=frame_min)
+            np.maximum(frame_max, values[:, channel], out=frame_max)
+    else:
+        frame_min = frame_max = values
+
     count = min(bucket_count, int(values.shape[0]))
-    edges = np.linspace(0, values.shape[0], count + 1, dtype=int)
-    bins = []
-    for index in range(count):
-        chunk = values[edges[index]:edges[index + 1]]
-        bins.append(
-            WaveformBin(
-                minimum=max(-1.0, min(1.0, float(np.min(chunk)))),
-                maximum=max(-1.0, min(1.0, float(np.max(chunk)))),
-            )
-        )
-    return tuple(bins)
+    starts = np.linspace(0, values.shape[0], count + 1, dtype=int)[:-1]
+    minima = np.clip(np.minimum.reduceat(frame_min, starts), -1.0, 1.0).tolist()
+    maxima = np.clip(np.maximum.reduceat(frame_max, starts), -1.0, 1.0).tolist()
+    return tuple(
+        WaveformBin(minimum=float(low), maximum=float(high))
+        for low, high in zip(minima, maxima)
+    )
 
 
 def resample_bins(

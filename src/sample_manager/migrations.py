@@ -39,6 +39,7 @@ def apply_migrations(db: Db) -> int:
         _migration_0003,
         _migration_0004,
         _migration_0005,
+        _migration_0006,
     ]
 
     for target_version, migrate_fn in enumerate(migrations, start=1):
@@ -368,6 +369,48 @@ def _migration_0005(db: Db) -> None:
             db.execute(statement)
 
         db.execute("UPDATE schema_version SET version = 5")
+
+
+# ---------------------------------------------------------------------------
+# Migration 0006 — Scan-time audio analysis (v2 milestone 2)
+# ---------------------------------------------------------------------------
+
+_MIGRATION_0006_SQL = """\
+CREATE TABLE IF NOT EXISTS sample_analysis (
+  sample_id         INTEGER PRIMARY KEY,
+  size_bytes        INTEGER NOT NULL,
+  mtime_ns          INTEGER NOT NULL,
+  analysis_version  INTEGER NOT NULL,
+  sample_rate       INTEGER NOT NULL,
+  channels          INTEGER NOT NULL,
+  frames            INTEGER NOT NULL,
+  duration_seconds  REAL NOT NULL,
+  peak              REAL NOT NULL,
+  rms               REAL NOT NULL,
+  loudness_lufs     REAL NULL,
+  short_term_max_lufs REAL NULL,
+  peak_levels       TEXT NOT NULL,
+  peaks             BLOB NOT NULL,
+  analyzed_at       TEXT NOT NULL DEFAULT (datetime('now')),
+
+  CONSTRAINT fk_sample_analysis_sample
+    FOREIGN KEY (sample_id) REFERENCES sample(id)
+    ON DELETE CASCADE
+);
+"""
+
+
+def _migration_0006(db: Db) -> None:
+    """Apply Migration 0006: store peak pyramids and loudness per sample.
+
+    Rows are valid only while ``(size_bytes, mtime_ns)`` match the file on
+    disk; ``analysis_version`` invalidates rows when the algorithm changes.
+    """
+    with db.transaction():
+        for statement in _split_sql_statements(_MIGRATION_0006_SQL):
+            db.execute(statement)
+
+        db.execute("UPDATE schema_version SET version = 6")
 
 
 def _split_sql_statements(sql: str) -> list[str]:

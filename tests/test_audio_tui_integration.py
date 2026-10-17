@@ -125,3 +125,34 @@ def test_unmount_closes_player():
     app = SampleManagerApp(audio_player=player)
     app.on_unmount()
     assert player.closed == 1
+
+
+class PrefetchingPlayer(FakePlayer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.prefetched = []
+
+    def prefetch(self, paths) -> None:
+        self.prefetched.append(list(paths))
+
+
+def test_neighbors_of_focused_row_are_prefetched_nearest_first():
+    player = PrefetchingPlayer()
+    app = SampleManagerApp(audio_player=player)
+    items = [_item(f"s{index}.wav") for index in range(6)] + [_item("drums", directory=True)]
+    state = NavState.initial(Path("/samples"), items)
+    app._state = NavState(
+        state.library_roots, state.current_root, state.current_dir, state.dir_stack,
+        state.items, 2, state.selection_ids,
+    )
+
+    app._prefetch_neighbors()
+
+    names = [path.name for path in player.prefetched[-1]]
+    assert names == ["s3.wav", "s1.wav", "s4.wav", "s0.wav", "s5.wav"]
+
+
+def test_players_without_prefetch_are_supported():
+    app = SampleManagerApp(audio_player=FakePlayer())
+    app._state = NavState.initial(Path("/samples"), [_item("a.wav"), _item("b.wav")])
+    app._prefetch_neighbors()  # must not raise

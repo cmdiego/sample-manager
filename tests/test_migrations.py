@@ -28,18 +28,18 @@ class TestEnsureSchemaVersion:
 
 
 class TestApplyMigrations:
-    def test_fresh_db_reaches_version_5(self, tmp_path):
+    def test_fresh_db_reaches_version_6(self, tmp_path):
         with Db(tmp_path / "test.sqlite3") as db:
             final = apply_migrations(db)
-            assert final == 5
+            assert final == 6
             stored = db.fetchval("SELECT version FROM schema_version")
-            assert stored == 5
+            assert stored == 6
 
     def test_idempotent_double_apply(self, tmp_path):
         with Db(tmp_path / "test.sqlite3") as db:
             apply_migrations(db)
             final = apply_migrations(db)
-            assert final == 5
+            assert final == 6
 
     def test_all_tables_exist(self, tmp_path):
         expected_tables = {
@@ -56,6 +56,7 @@ class TestApplyMigrations:
             "selection_sample",
             "export_run",
             "history_entry",
+            "sample_analysis",
         }
         with Db(tmp_path / "test.sqlite3") as db:
             apply_migrations(db)
@@ -114,13 +115,13 @@ class TestApplyMigrations:
                 f"Missing indexes: {expected_indexes - actual_indexes}"
             )
 
-    def test_schema_version_starts_zero_then_five(self, tmp_path):
+    def test_schema_version_starts_zero_then_latest(self, tmp_path):
         with Db(tmp_path / "test.sqlite3") as db:
             v0 = ensure_schema_version(db)
             assert v0 == 0
             apply_migrations(db)
-            v5 = db.fetchval("SELECT version FROM schema_version")
-            assert v5 == 5
+            latest = db.fetchval("SELECT version FROM schema_version")
+            assert latest == 6
 
 
 class TestMigration0001Constraints:
