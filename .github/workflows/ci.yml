@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Tests and builds need source access, but never permission to change the repo.
+permissions:
+  contents: read
+
+# A new commit supersedes older checks for the same PR or branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_QPA_PLATFORM: offscreen
+  PYTHONUTF8: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      # Let other platforms finish when one fails so portability failures are visible.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+          - os: ubuntu-latest
+            python: "3.14"
+          - os: macos-latest
+            python: "3.14"
+          - os: windows-latest
+            python: "3.14"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # Linux wheels still need system libraries to import Qt and PortAudio.
+      - name: Install Linux runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libegl1 libgl1 libopengl0 libportaudio2 libsndfile1
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev,audio]"
+          python -m pip check
+      - name: Run full regression suite
+        run: python -m pytest -ra --junitxml=test-results/pytest.xml
+      # Keep failures inspectable without depending on log retention or reruns.
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tests-${{ matrix.os }}-python-${{ matrix.python }}
+          path: test-results/pytest.xml
+          if-no-files-found: ignore
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Build and validate distributions
+        # The default build makes the wheel from the sdist, checking both artifacts.
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check --strict dist/*
+      - name: Smoke-test installed wheel
+        # A separate environment outside the checkout catches missing packaged modules.
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-smoke"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip check
+          "$RUNNER_TEMP/wheel-smoke/bin/sampleman" --help
+          "$RUNNER_TEMP/wheel-smoke/bin/sampleman" analyze --help
+          "$RUNNER_TEMP/wheel-smoke/bin/sampleman" tui --help
+          "$RUNNER_TEMP/wheel-smoke/bin/python" - <<'PY'
+          import asyncio
+          from importlib.resources import files
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from sample_manager.tui.app import SampleManagerApp
+          from sample_manager.tui.settings import TuiPreferences
+
+          # Styles must survive both sdist and wheel builds, not just source tests.
+          assert files("sample_manager.gui").joinpath("theme.qss").read_text()
+          assert files("sample_manager.tui.styles").joinpath("app.tcss").read_text()
+
+          async def check_tui():
+              """Mount the installed TUI with isolated config and no audio device."""
+              with TemporaryDirectory() as temporary:
+                  app = SampleManagerApp(
+                      config_path=Path(temporary) / "config.yaml",
+                      preferences=TuiPreferences(audio_output="disabled"),
+                  )
+                  async with app.run_test() as pilot:
+                      await pilot.pause()
+
+          asyncio.run(check_tui())
+          PY
+      - name: Upload distributions
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: distributions
+          path: dist/*
+          if-no-files-found: error

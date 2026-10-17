@@ -34,6 +34,28 @@ cd /path/to/sample_manager
 source .venv/bin/activate
 ```
 
+## Continuous integration
+
+GitHub Actions runs the full CLI, audio, Textual TUI, and offscreen Qt test suite
+for pull requests into `main` and pushes to `main`. The matrix covers Python
+3.10 and 3.14 on Linux, plus Python 3.14 on macOS and Windows. Tests install the
+`dev` and `audio` extras and use generated fixtures; no display or audio device
+is required. Each job uploads a JUnit report.
+
+A separate **Package** check builds the source distribution and wheel, checks
+their metadata, and verifies the installed wheel's CLI outside the checkout.
+Distributions are available as workflow artifacts; CI does not publish releases.
+The workflow can also be run manually from the Actions tab.
+
+To run the same regression suite locally after installing the extras:
+
+```bash
+python -m pip install ".[dev,audio]"
+QT_QPA_PLATFORM=offscreen python -m pytest -ra
+```
+
+On PowerShell, set `$env:QT_QPA_PLATFORM = "offscreen"` before running pytest.
+
 ## First Run
 
 The GUI creates the user config and example profiles automatically on first
