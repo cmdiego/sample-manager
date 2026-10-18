@@ -33,6 +33,7 @@ class ContainerMetadata:
         channels: channel count.
         bitrate: nominal bitrate in bits per second (mainly for lossy formats).
         bit_depth: bits per sample (mainly for PCM/lossless formats).
+        tags: normalized embedded tag labels/values; binary fields are summaries.
     """
 
     path: str
@@ -43,6 +44,7 @@ class ContainerMetadata:
     channels: Optional[int]
     bitrate: Optional[int]
     bit_depth: Optional[int]
+    tags: tuple[tuple[str, str], ...] = ()
 
 
 def read_metadata(path) -> ContainerMetadata:
@@ -83,6 +85,7 @@ def read_metadata(path) -> ContainerMetadata:
         channels=_opt_int(getattr(info, "channels", None)),
         bitrate=_opt_int(getattr(info, "bitrate", None)),
         bit_depth=_opt_int(getattr(info, "bits_per_sample", None)),
+        tags=_read_tags(mf),
     )
 
 
@@ -121,3 +124,76 @@ def _opt_float(value) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return fvalue if fvalue > 0 else None
+
+
+# ID3, MP4 and Vorbis use different keys for the same common fields. Unknown
+# keys remain visible so custom sample-pack metadata is not silently dropped.
+_TAG_LABELS = {
+    "TIT2": "Title", "TPE1": "Artist", "TPE2": "Album artist", "TALB": "Album",
+    "TRCK": "Track", "TPOS": "Disc", "TDRC": "Date", "TYER": "Year",
+    "TCON": "Genre", "TBPM": "BPM", "TKEY": "Key", "COMM": "Comment",
+    "TCOM": "Composer", "TCOP": "Copyright", "TSSE": "Encoder",
+    "USLT": "Lyrics", "APIC": "Artwork", "TXXX": "Custom", "WXXX": "URL",
+    "©nam": "Title", "©ART": "Artist", "aART": "Album artist", "©alb": "Album",
+    "©day": "Date", "©gen": "Genre", "©cmt": "Comment", "©wrt": "Composer",
+    "©too": "Encoder", "trkn": "Track", "disk": "Disc", "tmpo": "BPM",
+    "covr": "Artwork", "cprt": "Copyright",
+    "bpm": "BPM", "initialkey": "Key", "albumartist": "Album artist",
+    "tracknumber": "Track", "discnumber": "Disc",
+}
+_TAG_ORDER = ("Title", "Artist", "Album", "Album artist", "Track", "Disc", "Date", "Year", "Genre", "BPM", "Key", "Comment")
+
+
+def _clean_text(value) -> str:
+    """Remove terminal controls while preserving ordinary Unicode tag text."""
+    return " ".join("".join(char if char.isprintable() else " " for char in str(value)).split())
+
+
+def _tag_text(value) -> str:
+    """Render tag text/numbers while summarizing artwork and binary payloads."""
+    if isinstance(value, bytes):
+        # MP4 freeform fields carry an explicit text encoding; covers and
+        # opaque payloads do not. Decode only declared textual values.
+        encoding = {1: "utf-8", 2: "utf-16-be", 3: "shift-jis"}.get(getattr(value, "dataformat", None))
+        if encoding:
+            return _clean_text(value.decode(encoding, errors="replace"))
+        return f"{len(value):,} bytes (binary)"
+    if isinstance(value, (list, tuple)):
+        return "; ".join(filter(None, (_tag_text(part) for part in value)))
+    # ID3 frames expose text, URL, or binary data rather than plain strings.
+    if hasattr(value, "text"):
+        return _tag_text(value.text)
+    if hasattr(value, "url"):
+        return _clean_text(value.url)
+    if hasattr(value, "data"):
+        mime = _clean_text(getattr(value, "mime", "binary"))
+        return f"{mime} · {len(value.data):,} bytes"
+    if hasattr(value, "value"):
+        return _tag_text(value.value)
+    return _clean_text(value)
+
+
+def _read_tags(mf) -> tuple[tuple[str, str], ...]:
+    """Extract all exposed tags without decoding audio or changing the file."""
+    rows = []
+    for key, value in (getattr(mf, "tags", None) or {}).items():
+        raw_key = str(key)
+        base, separator, qualifier = raw_key.partition(":")
+        label = _TAG_LABELS.get(base, _TAG_LABELS.get(base.lower(), base.replace("_", " ").title()))
+        # Descriptions distinguish multiple comments, custom fields and URLs.
+        if separator and qualifier:
+            label += f" ({_clean_text(qualifier)})"
+        if base.lower() in ("metadata_block_picture", "coverart"):
+            text = "Embedded artwork (encoded image data)"
+        elif base in ("trkn", "disk") and value:
+            text = "/".join(str(number) for number in value[0])
+        else:
+            text = _tag_text(value)
+        if text:
+            rows.append((_clean_text(label), text))
+    # FLAC pictures live outside its Vorbis tag dictionary.
+    for index, picture in enumerate(getattr(mf, "pictures", ())):
+        rows.append((f"Artwork {index + 1}", _tag_text(picture)))
+    priority = {label: index for index, label in enumerate(_TAG_ORDER)}
+    rows.sort(key=lambda row: (priority.get(row[0], len(priority)), row[0].casefold()))
+    return tuple(rows)

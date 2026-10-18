@@ -50,7 +50,7 @@ class HelpScreen(ModalScreen):
                 classes="help-row",
             )
             yield Static(
-                "    Browse your sample library with j/k or ↑/↓.",
+                "    h/← parent · j/↓ down · k/↑ up · l/→ enter folder or sample actions.",
                 classes="help-row",
             )
             yield Static(
@@ -66,7 +66,7 @@ class HelpScreen(ModalScreen):
                 classes="help-row",
             )
             yield Static(
-                "    Tab switches Browser/Stage; arrows move, Return or d removes in Stage.",
+                "    Tab switches Browser/Stage; h stops at root; Return opens folders or removes Stage samples.",
                 classes="help-row",
             )
             yield Static(

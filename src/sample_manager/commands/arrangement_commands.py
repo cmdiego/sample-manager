@@ -11,10 +11,12 @@ import typer
 
 from .. import exit_codes
 from ..arrangement_service import build_plan
+from ..arrangement_workspace import ArrangementWorkspaceService
 from ..export_service import apply_plan, persist_export_history
 from ..export_service import revert_export as revert_export_service
 from ..repos.arrangement_repo import ArrangementRepo
 from ..repos.selection_repo import SelectionRepo
+from ..services.stage_workspace import StageWorkspace
 from .. import profiles as profiles_module
 from ..db import Db
 
@@ -149,7 +151,11 @@ def register(
             )
             repo = ArrangementRepo(db)
             created = repo.create(name=name, profile_name=profile_obj.name)
-            inserted = repo.add_samples(created["id"], sorted(initial_ids))
+            # Stage's virtual layout becomes the initial arrangement layout.
+            inserted = (
+                StageWorkspace(db).copy_to_arrangement(created["id"], sorted(initial_ids))
+                if from_selection else repo.add_samples(created["id"], sorted(initial_ids))
+            )
             db.conn.commit()
             payload = {
                 "id": created["id"],
@@ -256,7 +262,11 @@ def register(
                 from_selection=from_selection,
                 require_source=True,
             )
-            inserted = repo.add_samples(arrangement["id"], sorted(sample_ids))
+            # Merge Stage paths, preserving placement of samples already saved.
+            inserted = (
+                StageWorkspace(db).copy_to_arrangement(arrangement["id"], sorted(sample_ids))
+                if from_selection else repo.add_samples(arrangement["id"], sorted(sample_ids))
+            )
             db.conn.commit()
             total = len(repo.list_sample_ids(arrangement["id"]))
             payload = {"added": inserted, "requested": len(sample_ids), "sample_count": total}
@@ -358,6 +368,7 @@ def register(
                 arrangement_profile=arrangement_profile,
                 export_profile=exp_profile,
                 mode_hint="copy",
+                folder_paths=ArrangementWorkspaceService(db).get_sample_folder_paths(arrangement["id"]),
             )
             if format == "json":
                 print(json.dumps(plan, indent=2))
@@ -557,6 +568,7 @@ def register(
                 arrangement_profile=arrangement_profile,
                 export_profile=exp_profile,
                 mode_hint=mode,
+                folder_paths=ArrangementWorkspaceService(db).get_sample_folder_paths(arrangement["id"]),
             )
             if plan["errors"]:
                 raise ValueError("plan has errors: " + "; ".join(plan["errors"]))

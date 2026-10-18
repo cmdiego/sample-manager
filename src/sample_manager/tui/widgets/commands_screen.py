@@ -56,17 +56,17 @@ class CommandsScreen(ModalScreen[str | None]):
         if self._group is None:
             path = " Leader \\ "
             for group in COMMAND_GROUPS:
-                text = Text(f" {group.key} ", style="bold #7dcfff", no_wrap=True, overflow="ellipsis")
+                text = Text(f" {group.key} ", style="bold", no_wrap=True, overflow="ellipsis")
                 text.append("→ ", style="dim")
-                text.append(f"+ {group.title}", style="bold #bb9af7")
+                text.append(f"+ {group.title}", style="bold")
                 options.append(Option(text, id=group.key))
         else:
             path = f" \\ {self._group.key} · {self._group.title} "
             for key, action in self._group.entries:
                 reason = self._unavailable(action)
-                text = Text(f" {key} ", style="bold #7dcfff", no_wrap=True, overflow="ellipsis")
+                text = Text(f" {key} ", style="bold", no_wrap=True, overflow="ellipsis")
                 text.append("→ ", style="dim")
-                text.append(_SHORT_LABELS.get(action, ACTION_DESCRIPTIONS[action]), style="dim #c0caf5" if reason else "#bb9af7")
+                text.append(_SHORT_LABELS.get(action, ACTION_DESCRIPTIONS[action]), style="dim" if reason else "")
                 # A small direct-key hint helps users learn shortcuts without
                 # turning this sequence popup into the full shortcut reference.
                 shortcut = format_key(action_keys(action)[0])
@@ -153,9 +153,13 @@ class CommandsScreen(ModalScreen[str | None]):
 
 # The corner popup uses concise labels; full Help retains the longer descriptions.
 _SHORT_LABELS = {
+    "show_metadata": "Inspect directory / sample",
+    "stage_new_folder": "New Stage folder",
+    "stage_move": "Move Stage item",
+    "stage_rename": "Rename Stage folder",
     "toggle_playback": "Play / pause",
     "resume_playback": "Resume paused sample",
-    "select_or_descend": "Toggle selection / enter folder",
+    "select_or_descend": "Toggle Stage / enter folder",
     "add_to_selection": "Add to Stage",
     "remove_from_selection": "Remove from Stage",
     "activate_filter": "Search library",

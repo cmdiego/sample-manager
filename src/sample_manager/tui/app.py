@@ -8,20 +8,30 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
+from rich.markup import escape
+
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Container
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Static
+from textual.widgets import Static
 
 from ..audio import AudioPlayer, PlaybackStatus, WaveformData, WaveformService
 from ..audio.decode_cache import shared_decode_cache
+from ..audio.metadata import ContainerMetadata, read_metadata
+from ..audio.backends import BackendUnavailable
+from .widgets.metadata_panel import MetadataPanel
+from .widgets.metadata_screen import MetadataScreen
+from .widgets.directory_screen import DirectoryScreen
+from ..services.stage_workspace import StageWorkspace
+from .widgets.stage_path_screen import StagePathScreen
 from ..services.sample_analysis import StoredWaveformService, backfill_analysis
 from ..config import (
     add_library_root, ensure_config_exists, get_config_path, load_config,
     normalize_config, save_config,
 )
+from ..normalize import norm_rel_path
 from ..db import Db
 from ..migrations import apply_migrations
 from .data import TuiDataSource
@@ -39,7 +49,6 @@ from .widgets.add_library_screen import AddLibraryScreen
 from .widgets.browser_zone import BrowserZone
 from .widgets.file_tree import SampleListWidget
 from .widgets.selection_list import SelectedFilesListWidget
-from .widgets.session_summary import SessionSummaryWidget
 from .widgets.top_display import TopDisplayWidget
 
 
@@ -78,18 +87,8 @@ class SampleManagerApp(App):
         Binding("f4", "add_library", "Add Folder", priority=True),
         Binding("f5", "rescan_library", "Rescan", priority=True),
         Binding("f6", "edit_tags", "Tags", priority=True),
+        Binding("f7", "stage_new_folder", "Stage Folder", priority=True),
     ]
-
-    # Extra inline CSS for the grid container (tcss file covers widget styles)
-    CSS = """
-    #main-grid {
-        layout: grid;
-        grid-size: 2 2;
-        grid-columns: 3fr 1fr;
-        grid-rows: 2fr 3fr;
-        height: 1fr;
-    }
-    """
 
     def __init__(
         self,
@@ -100,6 +99,7 @@ class SampleManagerApp(App):
         player_factory: Callable[[TuiPreferences], AudioPlayer] = build_tui_player,
         config_path: Path | None = None,
         device_provider=None,
+        metadata_reader: Callable[[Path], ContainerMetadata] = read_metadata,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -115,14 +115,21 @@ class SampleManagerApp(App):
             waveform_service if waveform_service is not None
             else StoredWaveformService(decoder=shared_decode_cache())
         )
+        self._metadata_reader = metadata_reader
+        self._metadata_path: Path | None = None
+        self._metadata_generation = 0
         self._db: Db | None = None
         self._data: TuiDataSource | None = None
         self._state: NavState | None = None
         self._indexed: dict[str, int] = {}
         self._library_roots: tuple[Path, ...] = ()
+        self._preview_focused = False
         self._active_pane = "browser"
         self._stage_items: tuple[NavItem, ...] = ()
         self._stage_focused_index = 0
+        self._stage_current_folder_id: int | None = None
+        self._stage_entries: tuple[dict, ...] = ()
+        self._stage_restore_target: tuple[bool, int | None] | None = None
         self._scan_in_progress = False
         self._scan_message = ""
         self._analysis_cancel = threading.Event()
@@ -140,22 +147,27 @@ class SampleManagerApp(App):
         self._waveform_nav_active: bool = False
         self._nav_cursor_fraction: float = 0.0
         self._nav_display_width: int = 80
+        # Session-local identities survive sorting, selection and folder revisits.
+        self._browser_cursors: dict[Path, tuple[Path | None, int]] = {}
+        self._stage_cursors: dict[int | None, tuple[tuple[bool, int | None], int]] = {}
 
     # ── compose ────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
-        _placeholder = NavState.initial(Path("/"), [])
+        """Keep browsing dominant and share a compact preview across both panes."""
+        placeholder = NavState.initial(Path("/"), [])
+        yield Static("Sample Manager · F4 Add Folder to begin", id="library-header", markup=False)
+        yield TopDisplayWidget(id="top-display")
         with Container(id="main-grid"):
-            yield TopDisplayWidget(id="top-display")
-            yield SessionSummaryWidget(id="session-summary")
-            yield BrowserZone(_placeholder, id="browser-zone")
+            yield BrowserZone(placeholder, id="browser-zone")
             yield SelectedFilesListWidget(id="selection-list")
-        yield Static(
-            "  \\ commands · F2 settings · F4 add folder · / search · ? help · q quit",
-            id="status-bar",
-            markup=False,
-        )
-        yield Footer()
+        yield Static("F4 Add Folder · F2 Settings", id="status-bar", markup=False)
+        yield Static("F1 Commands · ? Help · q Quit", id="shortcut-bar", markup=False)
+
+    def on_resize(self, event) -> None:
+        """Reserve useful list space on short terminals and balance narrow panes."""
+        self.set_class(event.size.height < 30, "compact")
+        self.set_class(event.size.width < 100, "narrow")
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -218,6 +230,10 @@ class SampleManagerApp(App):
         yield SystemCommand("Settings", "Audio output and auto-audition preferences", self.action_show_settings)
         yield SystemCommand("Add Folder", "Index a sample folder and select its library", self.action_add_library)
         yield SystemCommand("Rescan Library", "Index added, changed, and removed samples", self.action_rescan_library)
+        yield SystemCommand("New Stage Folder", "Create virtual sample folders and subfolders", self.action_stage_new_folder)
+        yield SystemCommand("Move Stage Item", "Move a staged sample or folder", self.action_stage_move)
+        yield SystemCommand("Rename Stage Folder", "Rename the focused virtual Stage folder", self.action_stage_rename)
+        yield SystemCommand("Inspect Item", "List directory contents or inspect embedded audio metadata", self.action_show_metadata)
         yield SystemCommand("Sample Tags", "Add or remove tags for the focused sample", self.action_edit_tags)
 
     def action_show_settings(self) -> None:
@@ -318,6 +334,8 @@ class SampleManagerApp(App):
         """Run blocking I/O off-thread and refresh the TUI on its event loop."""
         try:
             result = await asyncio.to_thread(self._data.scan_directory, root)
+            # A rescan may reflect edited native tags on the current file.
+            self._metadata_path = None
             if activate:
                 self._activate_added_library(root)
             else:
@@ -473,6 +491,7 @@ class SampleManagerApp(App):
 
     def _load_root(self, root_path: Path) -> None:
         """Reset Browser navigation to a root while preserving the Stage."""
+        self._remember_browser_cursor()
         self._indexed = self._data.get_indexed_files(root_path)
         selection_ids = self._data.get_selection_ids()
         items = build_items(root_path, self._indexed, selection_ids, root=root_path)
@@ -480,6 +499,8 @@ class SampleManagerApp(App):
             root_path, items, selection_ids=selection_ids,
             library_roots=list(self._library_roots),
         )
+        self._state = self._restore_browser_cursor(self._state)
+        self._preview_focused = False
         self._active_pane = "browser"
         self._filter_active = False
         self._filter_query = ""
@@ -539,7 +560,7 @@ class SampleManagerApp(App):
         )
 
         browser: BrowserZone = self.query_one("#browser-zone", BrowserZone)
-        browser.set_class(self._active_pane == "browser", "active-pane")
+        browser.set_class(self._active_pane == "browser" and not self._preview_focused, "active-pane")
         browser.sample_list.update(
             display_state,
             empty_label="no matches" if self._filter_query else "empty directory",
@@ -549,13 +570,14 @@ class SampleManagerApp(App):
             count=len(filtered) if self._filter_query else None,
         )
 
-        # Session summary
+        # Stage owns its totals so a separate summary no longer consumes rows.
         total_bytes = self._data.get_selection_total_size()
         destination = self._data.get_active_destination()
-        self.query_one("#session-summary", SessionSummaryWidget).update(
-            count=len(selection_ids),
-            total_bytes=total_bytes,
-            destination=destination,
+        relative = self._state.current_dir.relative_to(self._state.current_root)
+        location = relative.as_posix() if relative.parts else "/"
+        browser.border_title = f"Browser · {escape(location)}"
+        self.query_one("#library-header", Static).update(
+            f"Sample Manager   ·   Library: {self._state.current_root.name}   ·   F1 Commands"
         )
 
         # Selected files list
@@ -563,32 +585,45 @@ class SampleManagerApp(App):
             (sid, row) for sid in sorted(selection_ids)
             if (row := self._data.get_sample_details(sid)) is not None
         ]
-        # Keep the visible Stage cursor and action target in the same order.
+        # Stage entries include virtual folders and a parent row; sample IDs
+        # remain the same persistent selection shared with the CLI and GUI.
+        rows = self._build_stage_rows(selected_rows)
+        self._stage_entries = tuple(rows)
         self._stage_items = tuple(
             NavItem(
                 name=row.get("filename", "?"),
-                path=self._data.get_sample_path(sid) or Path(row.get("filename", "?")),
-                is_dir=False,
-                sample_id=sid,
-                is_selected=True,
-            )
-            for sid, row in selected_rows
+                path=(Path(row["virtual_path"]) if row.get("is_dir") else
+                      self._data.get_sample_path(row["sample_id"]) or Path(row.get("filename", "?"))),
+                is_dir=bool(row.get("is_dir")),
+                sample_id=row.get("sample_id"),
+                is_selected=not row.get("is_dir", False),
+            ) for row in rows
         )
-        self._stage_focused_index = min(
-            self._stage_focused_index, max(0, len(self._stage_items) - 1)
-        )
+        if self._stage_restore_target is not None:
+            for index, row in enumerate(rows):
+                key = (bool(row.get("is_dir")), row.get("folder_id") if row.get("is_dir") else row.get("sample_id"))
+                if key == self._stage_restore_target:
+                    self._stage_focused_index = index
+                    break
+            self._stage_restore_target = None
+        self._stage_focused_index = min(self._stage_focused_index, max(0, len(rows) - 1))
+        workspace = self._get_stage_workspace()
         self.query_one("#selection-list", SelectedFilesListWidget).update(
-            [row for _sid, row in selected_rows],
-            focused_index=self._stage_focused_index,
-            active=self._active_pane == "stage",
+            rows, focused_index=self._stage_focused_index,
+            active=self._active_pane == "stage" and not self._preview_focused,
+            total_bytes=total_bytes, destination=destination,
+            sample_count=len(selection_ids),
+            folder_path=workspace.path(self._stage_current_folder_id) if workspace else "",
         )
 
         # Top display — update with focused item
         focused = self._effective_focused_item()
         details = self._data.get_sample_details(focused.sample_id) if (focused and focused.sample_id) else None
         top_display = self.query_one("#top-display", TopDisplayWidget)
+        top_display.set_class(self._preview_focused, "active-pane")
         top_display.update_focus(focused, details)
         self._request_waveform(focused, top_display)
+        self._request_metadata(focused, top_display.metadata_panel)
 
         self._set_status(self._build_status())
         if audition:
@@ -618,43 +653,43 @@ class SampleManagerApp(App):
         prefetch(nearest_first)
 
     def _build_status(self) -> str:
+        """Keep operational feedback separate from the active mode's shortcuts."""
         if self._state is None:
-            return ""
-        item = self._effective_focused_item()
-        focused_name = item.name if item else "(empty)"
-        sel_count = len(self._state.selection_ids)
-        depth = len(self._state.dir_stack)
-        back_hint = "  h/← back" if depth > 0 else ""
-        filter_hint = f"  Search: {self._filter_query}" if self._filter_active else ""
+            return "F4 Add Folder to start your sample library"
         playback = self._audio_player.snapshot()
-        audio_hint = (
-            "  |  audio:disabled" if self._preferences.audio_output == "disabled"
-            else f"  |  audio:{playback.status.value}"
-        )
+        audio = "Audio disabled" if self._preferences.audio_output == "disabled" else playback.status.value.capitalize()
+        if playback.duration_seconds:
+            audio += f" · {playback.position_seconds:.1f} / {playback.duration_seconds:.1f}s"
         if playback.error:
-            audio_hint += f" ({playback.error})"
-        pane_hint = "Stage" if self._active_pane == "stage" else "Browser"
-        root_hint = (
-            f"{self._library_roots.index(self._state.current_root) + 1}/"
-            f"{len(self._library_roots)}"
-            if self._library_roots else "1/1"
-        )
-        return (
-            f"  {self._scan_message + ' | ' if self._scan_message else ''}"
-            f"\\ commands · F2 settings · F5 rescan | {self._state.current_dir}"
-            f"{filter_hint}"
-            f"  |  {pane_hint} · root {root_hint}"
-            f"  |  {focused_name}"
-            f"  |  sel:{sel_count}"
-            f"{audio_hint}"
-            f"  |  j/k move · Tab pane · r root · Space play/pause · Return select · a add · d remove · / filter · ? help · q quit"
-            f"{back_hint}"
-        )
+            audio += f" · {playback.error}"
+        pane = "Preview" if self._preview_focused else ("Stage" if self._active_pane == "stage" else "Browser")
+        return f"{self._scan_message + ' · ' if self._scan_message else ''}{pane} · {audio}"
+
+    def _build_shortcuts(self) -> str:
+        """Show only applicable primary keys, keeping extended actions in F1."""
+        if self._state is None:
+            return "F4 Add Folder · F2 Settings · F1 Commands · ? Help · q Quit"
+        if self._preview_focused:
+            return "h/l Seek · j/k Scroll details · Enter Confirm seek · Ctrl+↓ Return · Esc Cancel"
+        if self._waveform_nav_active:
+            return "←/→ Seek · Shift+←/→ Coarse · Enter Confirm · Esc Cancel · ? Help"
+        if self._filter_active:
+            return "↑/↓ Results · Enter Toggle · Space Play · Shift+Space Type space · Esc Clear"
+        if self._active_pane == "stage":
+            item = self._effective_focused_item()
+            if item and item.is_dir:
+                return "h Parent · j/k Move · l Open · n Folder · m Move · F1 Commands"
+            return "Enter/d Remove · h Parent · j/k Move · l Actions · n Folder · m Move"
+        item = self._effective_focused_item()
+        if item and item.is_dir:
+            return "h Parent · j/k Move · l/Enter Open · / Search · Tab Stage · F1 Commands"
+        return "Enter Toggle · h Parent · j/k Move · l Actions · / Search · Tab Stage"
 
     def _set_status(self, text: str) -> None:
-        """Ignore late worker/timer updates after the status view is removed."""
+        """Ignore late updates while a modal or teardown hides the base screen."""
         try:
             self.query_one("#status-bar", Static).update(text)
+            self.query_one("#shortcut-bar", Static).update(self._build_shortcuts())
         except NoMatches:
             return
 
@@ -689,6 +724,21 @@ class SampleManagerApp(App):
             return None
         if self._state is None:
             return "Add a sample folder first (F4)."
+        if action in ("stage_new_folder", "stage_move", "stage_rename"):
+            if self._get_stage_workspace() is None:
+                return "Open an indexed library first (F4)."
+            if action != "stage_new_folder":
+                if self._active_pane != "stage" or not self._stage_entries:
+                    return "Focus an item in Stage first (Tab)."
+                entry = self._stage_entries[self._stage_focused_index]
+                if entry.get("is_parent"):
+                    return "Choose a Stage sample or folder, not the parent entry."
+                if action == "stage_rename" and not entry.get("is_dir"):
+                    return "Choose a Stage folder to rename."
+        if action == "show_metadata":
+            item = self._effective_focused_item()
+            if item is None:
+                return "Choose a directory or sample first."
         if action == "next_library_root" and len(self._library_roots) < 2:
             return "Add another library folder first (F4)."
         if action == "waveform_nav_enter":
@@ -701,6 +751,10 @@ class SampleManagerApp(App):
         item = self._effective_focused_item()
         if action in ("enter", "select_or_descend") and item is None:
             return "Choose an item in Browser or Stage first."
+        if action == "remove_from_selection" and self._active_pane == "stage" and self._stage_entries:
+            entry = self._stage_entries[self._stage_focused_index]
+            if entry.get("is_dir") and not entry.get("is_parent"):
+                return None
         if action in ("add_to_selection", "remove_from_selection", "edit_tags"):
             if item is None or item.is_dir or item.sample_id is None:
                 return "Choose an indexed sample first."
@@ -731,6 +785,40 @@ class SampleManagerApp(App):
                 event.stop()
                 self.action_show_commands()
             return
+        # Directional controls bypass search typing and seeking, while modal
+        # dialogs retain ownership of their keys through the guard above.
+        # Legacy terminals send Ctrl+H as byte 0x08, which Textual names
+        # Backspace. Preserve deletion in search and leave DEL (0x7f) alone;
+        # modal text fields have already returned above.
+        pane_key = event.key
+        if (
+            pane_key == "backspace"
+            and event.character == "\x08"
+            and not self._filter_active
+        ):
+            pane_key = "ctrl+h"
+        pane_action = resolve_key(pane_key)
+        if pane_action and pane_action.startswith("focus_pane_"):
+            event.stop()
+            event.prevent_default()
+            self._execute_command(pane_action)
+            return
+        if self._preview_focused:
+            if event.key in ("j", "down", "k", "up"):
+                event.stop()
+                event.prevent_default()
+                panel = self.query_one(TopDisplayWidget).metadata_panel
+                panel.scroll_relative(y=1 if event.key in ("j", "down") else -1, animate=False)
+                return
+            if event.key in ("escape", "enter"):
+                event.stop()
+                self._leave_preview(seek=event.key == "enter")
+                self._refresh_ui(audition=False)
+                return
+            # Loading/empty previews must not navigate the retained lower pane.
+            if event.key in ("h", "l", "left", "right") and not self._waveform_nav_active:
+                event.stop()
+                return
         # The leader also works during search; dismissing it preserves the query.
         # Real dialog Inputs still own backslashes (paths/tag names) above.
         if event.key == "backslash":
@@ -752,7 +840,7 @@ class SampleManagerApp(App):
             # All other keys (space, j/k, etc.) fall through.
 
         # In filter mode, capture raw characters before KEYMAP lookup
-        if self._filter_active:
+        if self._filter_active and not self._preview_focused:
             if event.key == "escape":
                 self._cancel_filter()
                 event.stop()
@@ -798,11 +886,18 @@ class SampleManagerApp(App):
             "add_library": self.action_add_library,
             "rescan_library": self.action_rescan_library,
             "edit_tags": self.action_edit_tags,
+            "show_metadata": self.action_show_metadata,
+            "stage_new_folder": self.action_stage_new_folder,
+            "stage_move": self.action_stage_move,
+            "stage_rename": self.action_stage_rename,
         }
         if action in app_actions:
             app_actions[action]()
             return
         if self._state is None:
+            return
+        if action.startswith("focus_pane_"):
+            self._focus_pane_direction(action.removeprefix("focus_pane_"))
             return
         if action == "waveform_nav_enter":
             # Keep the current sample/query intact; search owns letter input.
@@ -841,7 +936,7 @@ class SampleManagerApp(App):
             if self._filter_active:
                 self._cancel_filter()
             elif self._active_pane == "stage":
-                self._cycle_pane_focus()
+                self._stage_go_back()
             else:
                 self._handle_go_back()
         elif action == "enter":
@@ -858,7 +953,10 @@ class SampleManagerApp(App):
             if self._filter_active:
                 self._cancel_filter()
             elif self._active_pane == "stage":
-                self._cycle_pane_focus()
+                if self._stage_current_folder_id is None:
+                    self._cycle_pane_focus()
+                else:
+                    self._stage_go_back()
             else:
                 self._handle_go_back()
         elif action == "cycle_pane_focus":
@@ -994,6 +1092,249 @@ class SampleManagerApp(App):
             return
         fraction = self._nav_cursor_fraction if self._waveform_nav_active else None
         top_display.set_nav_cursor(fraction)
+        self._set_status(self._build_status())
+
+    # ── persistent virtual Stage folders ──────────────────────────────────
+
+    def _get_stage_workspace(self) -> StageWorkspace | None:
+        """Use folder capabilities when the data adapter provides persistence."""
+        workspace = getattr(self._data, "stage_workspace", None)
+        return workspace if isinstance(workspace, StageWorkspace) else None
+
+    def _build_stage_rows(self, selected_rows: list[tuple[int, dict]]) -> list[dict]:
+        """Render direct children of the current virtual folder, folders first."""
+        workspace = self._get_stage_workspace()
+        if workspace is None:
+            return [dict(row, sample_id=sid) for sid, row in selected_rows]
+        folders = workspace.folders()
+        current = next((row for row in folders if row["id"] == self._stage_current_folder_id), None)
+        if self._stage_current_folder_id is not None and current is None:
+            self._stage_current_folder_id = None
+        rows = []
+        if current is not None:
+            rows.append({"filename": "..", "is_dir": True, "is_parent": True,
+                         "folder_id": current["parent_id"], "virtual_path": workspace.path(current["parent_id"])})
+        rows.extend(
+            {"filename": folder["name"], "is_dir": True, "folder_id": folder["id"],
+             "virtual_path": workspace.path(folder["id"])}
+            for folder in folders if folder["parent_id"] == self._stage_current_folder_id
+        )
+        placements = workspace.placements()
+        rows.extend(dict(row, sample_id=sid) for sid, row in selected_rows if placements.get(sid) == self._stage_current_folder_id)
+        return rows
+
+    def _stage_add_sample(self, sample_id: int) -> bool:
+        """Target the open Stage folder without moving an existing selection."""
+        try:
+            workspace = self._get_stage_workspace()
+            if workspace is not None:
+                workspace.stage_sample(sample_id, self._stage_current_folder_id)
+            else:
+                self._data.add_to_selection(sample_id)
+        except Exception as exc:  # noqa: BLE001 - stale destinations/storage errors stay visible
+            self.notify(f"Could not add to Stage: {exc}", severity="error")
+            return False
+        return True
+
+    def _remember_stage_cursor(self) -> None:
+        """Remember a folder/sample identity and fallback row before leaving it."""
+        if not self._stage_entries:
+            return
+        entry = self._stage_entries[self._stage_focused_index]
+        if entry.get("is_parent"):
+            return  # Reentering should restore a real item, not the parent row.
+        target = (bool(entry.get("is_dir")), entry.get("folder_id") if entry.get("is_dir") else entry.get("sample_id"))
+        self._stage_cursors[self._stage_current_folder_id] = (target, self._stage_focused_index)
+
+    def _stage_open_focused(self) -> bool:
+        """Open a folder/parent row; return False for a sample action."""
+        if not self._stage_entries:
+            return False
+        entry = self._stage_entries[self._stage_focused_index]
+        if not entry.get("is_dir"):
+            return False
+        if entry.get("is_parent"):
+            self._stage_go_back()
+            return True
+        self._remember_stage_cursor()
+        self._stage_current_folder_id = entry["folder_id"]
+        remembered = self._stage_cursors.get(self._stage_current_folder_id)
+        self._stage_restore_target = remembered[0] if remembered else None
+        # Skip the parent row when first entering a nonempty Stage folder.
+        # Repeated l can then descend multiple levels without bouncing back.
+        self._stage_focused_index = remembered[1] if remembered else 1
+        self._refresh_ui(audition=False)
+        return True
+
+    def _stage_go_back(self) -> None:
+        """Ascend Stage folders, keeping h/Left within the active pane at root."""
+        workspace = self._get_stage_workspace()
+        if self._stage_current_folder_id is None or workspace is None:
+            return
+        self._remember_stage_cursor()
+        previous = self._stage_current_folder_id
+        try:
+            self._stage_current_folder_id = workspace.folder(previous)["parent_id"]
+        except ValueError:
+            self._stage_current_folder_id = None
+        self._stage_restore_target = (True, previous)
+        self._refresh_ui(audition=False)
+
+    def action_stage_new_folder(self) -> None:
+        """Create a folder/path under the open Stage destination."""
+        self._show_stage_editor("stage_new_folder")
+
+    def action_stage_move(self) -> None:
+        """Move a captured Stage sample or folder to another virtual path."""
+        self._show_stage_editor("stage_move")
+
+    def action_stage_rename(self) -> None:
+        """Rename the captured Stage folder without altering its contents."""
+        self._show_stage_editor("stage_rename")
+
+    def _show_stage_editor(self, action: str) -> None:
+        """Capture IDs before displaying a form; validation errors stay editable."""
+        if isinstance(self.screen, ModalScreen):
+            return
+        reason = self._command_unavailable(action)
+        if reason:
+            self.notify(reason, severity="warning")
+            return
+        workspace = self._get_stage_workspace()
+        parent_id = self._stage_current_folder_id
+        try:
+            current_path = workspace.path(parent_id)
+        except ValueError:
+            # Another client can clear Stage while this view remains open.
+            # Refresh to root and require a fresh choice rather than targeting
+            # a stale destination or silently modifying a neighboring item.
+            self._stage_current_folder_id = None
+            self._refresh_ui(audition=False)
+            self.notify("Stage folder changed. Choose a folder and try again.", severity="warning")
+            return
+        entry = dict(self._stage_entries[self._stage_focused_index]) if action != "stage_new_folder" else {}
+        folder = bool(entry.get("is_dir"))
+        title = {"stage_new_folder": "New Stage folder", "stage_move": "Move Stage item", "stage_rename": "Rename Stage folder"}[action]
+        note = (f"Inside {current_path} · Use Drums/Kicks for subfolders; / starts at Stage root."
+                if action == "stage_new_folder" else
+                "Destination Stage folder: / for root. Missing folders will be created."
+                if action == "stage_move" else "Enter a new name for this virtual folder.")
+        initial = current_path if action == "stage_move" else entry.get("filename", "") if action == "stage_rename" else ""
+
+        def apply(text: str) -> None:
+            """Commit against the captured source and change view only on success."""
+            if action == "stage_new_folder":
+                self._stage_current_folder_id = workspace.create_folder(text, parent_id)
+                self._stage_focused_index = 0
+            elif action == "stage_move":
+                self._stage_current_folder_id = (
+                    workspace.move_folder(entry["folder_id"], text) if folder
+                    else workspace.move_sample(entry["sample_id"], text)
+                )
+                self._stage_restore_target = (folder, entry["folder_id"] if folder else entry["sample_id"])
+            else:
+                workspace.rename_folder(entry["folder_id"], text)
+                self._stage_restore_target = (True, entry["folder_id"])
+            if self._waveform_nav_active:
+                self._exit_waveform_nav(seek=False)
+            self._preview_focused = False
+            self._active_pane = "stage"
+            self._filter_active, self._filter_query = False, ""
+            self._filter_results = ()
+            self._filter_focused_index = 0
+
+        self.push_screen(StagePathScreen(title, note, apply, initial), self._on_stage_edit_completed)
+
+    def _on_stage_edit_completed(self, changed: bool) -> None:
+        """Refresh after dismissal so cancel preserves the original view exactly."""
+        if changed:
+            self._refresh_ui(audition=False)
+
+    # ── native file metadata ──────────────────────────────────────────────
+
+    def _directory_sample_id(self, path: Path) -> int | None:
+        """Resolve inspector files using the same root-relative index as Browser."""
+        if self._state is None:
+            return None
+        try:
+            relative = norm_rel_path(path.relative_to(self._state.current_root))
+        except ValueError:
+            return None
+        return self._indexed.get(relative)
+
+    def _directory_sample_selected(self, path: Path) -> bool | None:
+        """Expose eligibility and current Stage membership to the inspector."""
+        sample_id = self._directory_sample_id(path)
+        return sample_id in self._data.get_selection_ids() if sample_id is not None else None
+
+    def _directory_change_stage(self, path: Path, action: str) -> str:
+        """Stage one indexed file into the open destination, keeping tree focus."""
+        sample_id = self._directory_sample_id(path)
+        if sample_id is None or path.is_symlink():
+            raise ValueError("This file is not an indexed sample. Rescan the library with F5 first.")
+        selected = sample_id in self._data.get_selection_ids()
+        remove = action == "remove" or (action == "toggle" and selected)
+        if remove:
+            self._data.remove_from_selection(sample_id)
+        else:
+            if not path.is_file():
+                raise ValueError("This sample file is no longer available.")
+            if not self._stage_add_sample(sample_id):
+                raise ValueError("Could not add sample to the current Stage folder.")
+        self._state = self._state.with_selection(self._data.get_selection_ids())
+        self._refresh_ui(audition=False)
+        return f"{'Removed from' if remove else 'Added to'} Stage: {path.name}"
+
+    def action_show_metadata(self) -> None:
+        """Inspect the focused directory contents or sample metadata."""
+        if isinstance(self.screen, ModalScreen):
+            return
+        item = self._effective_focused_item()
+        if item is None:
+            self.notify("Choose a directory or sample first.")
+            return
+        if item.is_dir:
+            if self._active_pane == "stage":
+                self._stage_open_focused()
+                return
+            self.push_screen(DirectoryScreen(
+                item.path, sample_selected=self._directory_sample_selected,
+                change_stage=self._directory_change_stage,
+            ))
+            return
+        panel = self.query_one(TopDisplayWidget).metadata_panel
+        self.push_screen(MetadataScreen(panel))
+
+    def _request_metadata(self, item: NavItem | None, panel: MetadataPanel) -> None:
+        """Read once per focused target, independently of waveform decoding."""
+        path = item.path if item is not None and not item.is_dir else None
+        if path == self._metadata_path:
+            return
+        self._metadata_path = path
+        self._metadata_generation += 1
+        if path is None:
+            return
+        self.run_worker(
+            self._load_metadata(path, self._metadata_generation, panel),
+            name="embedded-metadata", group="embedded-metadata",
+            exclusive=True, exit_on_error=False,
+        )
+
+    async def _load_metadata(self, path: Path, generation: int, panel: MetadataPanel) -> None:
+        """Discard late reads after focus changes; file errors never stop browsing."""
+        metadata = None
+        error = ""
+        try:
+            metadata = await asyncio.to_thread(self._metadata_reader, path)
+        except asyncio.CancelledError:
+            return
+        except BackendUnavailable:
+            error = "Metadata reader unavailable. Install sample-manager[audio]."
+        except Exception as exc:  # noqa: BLE001 - malformed files are nonfatal
+            error = f"Metadata unavailable: {exc}"
+        if generation == self._metadata_generation and path == self._metadata_path:
+            # The panel reference stays valid while the full view is open.
+            panel.set_result(path, metadata, error)
 
     # ── waveform ──────────────────────────────────────────────────────────
 
@@ -1044,6 +1385,9 @@ class SampleManagerApp(App):
             return
         self._waveform_data = data
         self.query_one("#top-display", TopDisplayWidget).set_waveform_data(data)
+        # Preview may receive focus while decoding is still in flight.
+        if self._preview_focused and not self._waveform_nav_active:
+            self._enter_waveform_nav()
 
     # ── filter ─────────────────────────────────────────────────────────────
 
@@ -1053,6 +1397,7 @@ class SampleManagerApp(App):
         # without seeking so one key press never controls both interfaces.
         if self._waveform_nav_active:
             self._exit_waveform_nav(seek=False)
+        self._preview_focused = False
         self._active_pane = "browser"
         self._filter_active = True
         self._filter_query = ""
@@ -1062,17 +1407,42 @@ class SampleManagerApp(App):
 
     def on_paste(self, event) -> None:
         """Accept pasted search text without interpreting it as app commands."""
-        if self._filter_active and len(self.screen_stack) <= 1:
+        if self._filter_active and not self._preview_focused and len(self.screen_stack) <= 1:
             text = " ".join(event.text.splitlines())
             self._update_filter_query(self._filter_query + text)
             event.stop()
 
+    def _leave_preview(self, *, seek: bool = False) -> None:
+        """Return to the retained sample pane, cancelling unconfirmed seeking."""
+        self._preview_focused = False
+        if self._waveform_nav_active:
+            self._exit_waveform_nav(seek=seek)
+
+    def _focus_pane_direction(self, direction: str) -> None:
+        """Follow the visible three-pane layout, stopping at its outer edges."""
+        if direction == "up":
+            if not self._preview_focused:
+                self._preview_focused = True
+                if not self._waveform_nav_active:
+                    self._enter_waveform_nav()
+                self._refresh_ui(audition=False)
+            return
+        if self._preview_focused:
+            # Preview spans the full row, so it has no horizontal neighbour.
+            if direction == "down":
+                self._leave_preview()
+                self._refresh_ui(audition=False)
+            return
+        target = {"left": "browser", "right": "stage"}.get(direction)
+        if target is not None and target != self._active_pane:
+            self._cycle_pane_focus()
+
     def _cycle_pane_focus(self) -> None:
         """Move keyboard actions between Browser and the persistent Stage."""
+        self._leave_preview()
         self._active_pane = "stage" if self._active_pane == "browser" else "browser"
         if self._active_pane == "stage":
-            # Search typing must stop when Tab leaves Browser, while the
-            # underlying directory cursor remains available on return.
+            # Stop search typing when leaving Browser, retaining its directory cursor.
             self._filter_active = False
             self._filter_query = ""
             self._filter_focused_index = 0
@@ -1089,20 +1459,43 @@ class SampleManagerApp(App):
 
     # ── navigation ─────────────────────────────────────────────────────────
 
+    def _remember_browser_cursor(self) -> None:
+        """Remember the underlying directory cursor without capturing search hits."""
+        if self._state is not None:
+            item = self._state.focused_item
+            self._browser_cursors[self._state.current_dir] = (
+                item.path if item else None, self._state.focused_index,
+            )
+
+    def _restore_browser_cursor(self, state: NavState) -> NavState:
+        """Restore by path; removed items fall back to the nearest valid row."""
+        remembered = self._browser_cursors.get(state.current_dir)
+        if remembered is None or not state.items:
+            return state
+        path, index = remembered
+        target = next((i for i, item in enumerate(state.items) if item.path == path), max(0, min(index, len(state.items) - 1)))
+        return replace(state, focused_index=target)
+
+    def _enter_browser_directory(self, path: Path) -> None:
+        """Use identical remembered entry behavior for l/Right and Return."""
+        self._remember_browser_cursor()
+        items = build_items(path, self._indexed, self._data.get_selection_ids(), root=self._state.current_root)
+        self._state = self._restore_browser_cursor(self._state.enter_dir(path, items))
+        self._cancel_filter()
+
     def _handle_enter(self) -> None:
-        # In filter mode, navigate within filtered results
+        """Enter folders with cursor memory, or keep existing sample actions."""
         item = self._effective_focused_item()
 
         if item is None:
             return
 
+        if item.is_dir and self._active_pane == "stage":
+            self._stage_open_focused()
+            return
+
         if item.is_dir:
-            selection_ids = self._data.get_selection_ids()
-            new_items = build_items(
-                item.path, self._indexed, selection_ids, root=self._state.current_root
-            )
-            self._state = self._state.enter_dir(item.path, new_items)
-            self._cancel_filter()
+            self._enter_browser_directory(item.path)
         else:
             self.push_screen(
                 ActionPane(item, item.is_selected),
@@ -1122,16 +1515,12 @@ class SampleManagerApp(App):
             return
 
         if self._active_pane == "stage":
-            self._remove_focused()
+            if not self._stage_open_focused():
+                self._remove_focused()
             return
 
         if item.is_dir:
-            selection_ids = self._data.get_selection_ids()
-            new_items = build_items(
-                item.path, self._indexed, selection_ids, root=self._state.current_root
-            )
-            self._state = self._state.enter_dir(item.path, new_items)
-            self._cancel_filter()
+            self._enter_browser_directory(item.path)
         else:
             if item.sample_id is None:
                 return
@@ -1139,14 +1528,17 @@ class SampleManagerApp(App):
             if item.is_selected:
                 self._data.remove_from_selection(item.sample_id)
             else:
-                self._data.add_to_selection(item.sample_id)
+                if not self._stage_add_sample(item.sample_id):
+                    return
             selection_ids = self._data.get_selection_ids()
             self._state = self._state.with_selection(selection_ids)
             self._refresh_ui()
 
     def _handle_go_back(self) -> None:
+        """Remember the child cursor, then highlight that folder in its parent."""
         if not self._state.dir_stack:
             return
+        self._remember_browser_cursor()
         parent_dir = self._state.dir_stack[-1]
         came_from = self._state.current_dir.name
         selection_ids = self._data.get_selection_ids()
@@ -1163,13 +1555,27 @@ class SampleManagerApp(App):
         item = self._effective_focused_item()
         if item is None or item.sample_id is None:
             return
-        self._data.add_to_selection(item.sample_id)
+        if not self._stage_add_sample(item.sample_id):
+            return
         selection_ids = self._data.get_selection_ids()
         self._state = self._state.with_selection(selection_ids)
         self._refresh_ui()
 
     def _remove_focused(self) -> None:
         """Remove the currently visible row from the persistent selection."""
+        if self._active_pane == "stage" and self._stage_entries:
+            entry = self._stage_entries[self._stage_focused_index]
+            if entry.get("is_dir"):
+                workspace = self._get_stage_workspace()
+                if entry.get("is_parent") or workspace is None:
+                    return
+                try:
+                    workspace.remove_folder(entry["folder_id"])
+                    self._stage_cursors.pop(entry["folder_id"], None)
+                except ValueError as exc:
+                    self.notify(str(exc), severity="warning")
+                self._refresh_ui(audition=False)
+                return
         item = self._effective_focused_item()
         if item is None or item.sample_id is None:
             return
@@ -1189,7 +1595,8 @@ class SampleManagerApp(App):
                 if self._data.get_sample_details(sample_id) is None:
                     raise ValueError("This sample is no longer indexed")
                 if result == "add":
-                    self._data.add_to_selection(sample_id)
+                    if not self._stage_add_sample(sample_id):
+                        return
                 else:
                     self._data.remove_from_selection(sample_id)
                 self._state = self._state.with_selection(self._data.get_selection_ids())

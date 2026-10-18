@@ -63,17 +63,17 @@ def render_waveform(
     for row in range(height):
         for column, item in enumerate(fitted):
             if column == cursor:
-                output.append("│", style="bold yellow")
+                output.append("│", style="bold")
                 continue
             top = round((1.0 - item.maximum) * (height - 1) / 2.0)
             bottom = round((1.0 - item.minimum) * (height - 1) / 2.0)
             if item.maximum != 0.0 or item.minimum != 0.0:
                 if top <= row <= bottom:
-                    style = "bright_green" if column < cursor else "green"
+                    style = "bold" if column < cursor else ""
                     output.append("█", style=style)
                     continue
             if row == round(center):
-                output.append("─", style="dim green")
+                output.append("─", style="dim")
             else:
                 output.append(" ")
         if row < height - 1:
@@ -156,16 +156,17 @@ def render_braille_waveform(
                 if term_row < height:
                     grid[bc][term_row] |= _BRAILLE_DOT[c_idx][sub_row]
 
-    # Render to rich.Text.
+    # Inherit the widget accent; weight and reverse distinguish playback and
+    # seeking even in monochrome terminals.
     output = Text()
     for row in range(height):
         for bc in range(braille_cols):
             # Special column: nav cursor takes priority over playback cursor.
             if bc == nav_col:
-                output.append("▌", style="bold cyan")
+                output.append("▌", style="bold reverse")
                 continue
             if bc == play_col:
-                output.append("│", style="bold yellow")
+                output.append("│", style="bold")
                 continue
             mask = grid[bc][row]
             ch = chr(_BRAILLE_BASE | mask)
@@ -173,9 +174,9 @@ def render_braille_waveform(
             if mask == 0:
                 output.append("⠀", style="dim")  # blank Braille (U+2800)
             elif bc < play_col:
-                output.append(ch, style="bright_green")
+                output.append(ch, style="bold")
             else:
-                output.append(ch, style="green")
+                output.append(ch, style="")
         if row < height - 1:
             output.append("\n")
     return output
@@ -240,6 +241,8 @@ class WaveformWidget(Widget):
         height = max(1, self.size.height)
         if self._data is not None:
             return render_braille_waveform(
-                self._data.bins, width, height, self._progress, self._nav_cursor
+                # The renderer consumes two source columns per terminal cell.
+                # Pass the source width so the waveform fills its actual pane.
+                self._data.bins, width * 2, height, self._progress, self._nav_cursor
             )
         return Text(self._message, style="dim", justify="center", overflow="ellipsis")

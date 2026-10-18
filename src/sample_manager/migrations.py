@@ -40,6 +40,7 @@ def apply_migrations(db: Db) -> int:
         _migration_0004,
         _migration_0005,
         _migration_0006,
+        _migration_0007,
     ]
 
     for target_version, migrate_fn in enumerate(migrations, start=1):
@@ -434,3 +435,28 @@ def _split_sql_statements(sql: str) -> list[str]:
         if cleaned:
             statements.append(cleaned)
     return statements
+
+
+# Stage folders are independent of saved arrangements; legacy selections stay
+# at root because the new placement column defaults to NULL.
+_MIGRATION_0007_SQL = """\
+CREATE TABLE stage_folder (
+  id INTEGER PRIMARY KEY,
+  parent_id INTEGER REFERENCES stage_folder(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  name_norm TEXT NOT NULL,
+  CHECK (id <> parent_id)
+);
+CREATE UNIQUE INDEX idx_stage_folder_root ON stage_folder(name_norm) WHERE parent_id IS NULL;
+CREATE UNIQUE INDEX idx_stage_folder_sibling ON stage_folder(parent_id, name_norm) WHERE parent_id IS NOT NULL;
+ALTER TABLE selection_sample ADD COLUMN folder_id INTEGER REFERENCES stage_folder(id) ON DELETE SET NULL;
+CREATE INDEX idx_selection_sample_folder ON selection_sample(folder_id);
+"""
+
+
+def _migration_0007(db: Db) -> None:
+    """Add persistent Stage folders while preserving every existing selection."""
+    with db.transaction():
+        for statement in _split_sql_statements(_MIGRATION_0007_SQL):
+            db.execute(statement)
+        db.execute("UPDATE schema_version SET version = 7")

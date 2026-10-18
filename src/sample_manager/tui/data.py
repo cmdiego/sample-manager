@@ -14,6 +14,7 @@ from pathlib import Path
 from ..db import Db
 from ..scanner import ScanResult
 from ..services.library_browser import LibraryBrowserService
+from ..services.stage_workspace import StageWorkspace
 from ..tag_service import list_sample_tags, resolve_tag, tag_sample, untag_sample
 from .nav_state import NavItem
 
@@ -22,6 +23,7 @@ class TuiDataSource:
     def __init__(self, db: Db) -> None:
         self._db = db
         self._service = LibraryBrowserService(db)
+        self.stage_workspace = StageWorkspace(db)
 
     def get_library_roots(self) -> list[dict]:
         return self._service.library_root_rows()

@@ -551,3 +551,42 @@ class TestExportAndRevert:
             ],
         )
         assert revert_res.exit_code in (0, ERROR_PARTIAL_OPERATION)
+
+
+def test_stage_folders_survive_arrangement_preview_and_copy_export(cli_runner, setup_config, tmp_path):
+    """A Stage hierarchy reaches exported copies without moving source samples."""
+    from sample_manager.scanner import scan_library
+    from sample_manager.services.stage_workspace import StageWorkspace
+    from sample_manager.arrangement_workspace import ArrangementWorkspaceService
+
+    db_path, profiles_dir = setup_config
+    _write_yaml(profiles_dir / ARRANGEMENT_PROFILES_FILENAME, [{
+        "name": "stage-test", "layout_mode": "monolithic",
+        "naming_template": "{name}", "collision_policy": "suffix",
+    }])
+    _write_export_profile(profiles_dir)
+    kick, snare = _seed_samples(db_path, tmp_path)
+    library = tmp_path / "lib"
+    (library / "kick.wav").write_bytes(b"original kick")
+    (library / "snare.wav").write_bytes(b"original snare")
+    with Db(db_path) as db:
+        scan_library(db, library, fast=True)
+        stage = StageWorkspace(db)
+        folder = stage.create_folder("Drums/Kicks")
+        stage.stage_sample(kick, folder)
+        stage.stage_sample(snare)
+    created = cli_runner.invoke(app, ["arrangement", "create", "Staged Kit", "--profile", "stage-test", "--from-selection", "--json"])
+    assert created.exit_code == 0, created.output
+    arrangement_id = json.loads(created.output)["id"]
+    with Db(db_path) as db:
+        assert ArrangementWorkspaceService(db).get_sample_folder_paths(arrangement_id)[kick] == "Drums/Kicks"
+    preview = cli_runner.invoke(app, ["arrangement", "preview", "Staged Kit", "--format", "json"])
+    assert preview.exit_code == 0, preview.output
+    plan = json.loads(preview.output)
+    assert {operation["dst_rel_path"] for operation in plan["operations"]} == {"Drums/Kicks/kick.wav", "snare.wav"}
+    output = tmp_path / "copies"
+    exported = cli_runner.invoke(app, ["export", "Staged Kit", "--to", str(output), "--mode", "copy", "--confirm", "--json"])
+    assert exported.exit_code == 0, exported.output
+    assert (output / "Drums" / "Kicks" / "kick.wav").read_bytes() == (library / "kick.wav").read_bytes() == b"original kick"
+    assert (output / "snare.wav").read_bytes() == (library / "snare.wav").read_bytes() == b"original snare"
+    assert not (library / "Drums").exists()

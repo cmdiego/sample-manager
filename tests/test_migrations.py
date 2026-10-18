@@ -28,18 +28,18 @@ class TestEnsureSchemaVersion:
 
 
 class TestApplyMigrations:
-    def test_fresh_db_reaches_version_6(self, tmp_path):
+    def test_fresh_db_reaches_version_7(self, tmp_path):
         with Db(tmp_path / "test.sqlite3") as db:
             final = apply_migrations(db)
-            assert final == 6
+            assert final == 7
             stored = db.fetchval("SELECT version FROM schema_version")
-            assert stored == 6
+            assert stored == 7
 
     def test_idempotent_double_apply(self, tmp_path):
         with Db(tmp_path / "test.sqlite3") as db:
             apply_migrations(db)
             final = apply_migrations(db)
-            assert final == 6
+            assert final == 7
 
     def test_all_tables_exist(self, tmp_path):
         expected_tables = {
@@ -57,6 +57,7 @@ class TestApplyMigrations:
             "export_run",
             "history_entry",
             "sample_analysis",
+            "stage_folder",
         }
         with Db(tmp_path / "test.sqlite3") as db:
             apply_migrations(db)
@@ -97,6 +98,9 @@ class TestApplyMigrations:
             "idx_arrangement_folder_tree_loading",
             # selection indexes
             "idx_selection_sample_created_at",
+            "idx_selection_sample_folder",
+            "idx_stage_folder_root",
+            "idx_stage_folder_sibling",
             # export/history indexes
             "idx_export_run_arrangement_id",
             "idx_export_run_status",
@@ -121,7 +125,7 @@ class TestApplyMigrations:
             assert v0 == 0
             apply_migrations(db)
             latest = db.fetchval("SELECT version FROM schema_version")
-            assert latest == 6
+            assert latest == 7
 
 
 class TestMigration0001Constraints:

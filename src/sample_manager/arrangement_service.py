@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .profiles import ArrangementProfile, ExportProfile
 
@@ -69,7 +69,7 @@ def build_plan(
             folder_path = folder_paths[s["id"]]
             if folder_path:
                 # Normalize and combine paths
-                dst_rel_path = str(Path(folder_path) / dst_rel_path)
+                dst_rel_path = str(PurePosixPath(folder_path) / dst_rel_path)
                 dst_rel_path = _MULTISLASH.sub("/", dst_rel_path.strip().strip("/"))
 
         ops.append(

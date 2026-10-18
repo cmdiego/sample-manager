@@ -111,7 +111,7 @@ def test_metadata_refresh_keeps_waveform_progress_and_seek_cursor(waveform_env):
             preview.update_focus(app._effective_focused_item(), details)
             app._request_waveform(app._effective_focused_item(), preview)
             assert waveform._progress == 0.6
-            assert r"New \[tag]" in " ".join(str(row.content) for row in preview.query(Static))
+            assert "New [tag]" in " ".join(str(row.content) for row in preview.query(Static))
             service.load.assert_called_once()
     asyncio.run(exercise())
 
