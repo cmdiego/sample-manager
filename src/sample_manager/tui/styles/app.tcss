@@ -1,175 +1,146 @@
-/* Sample Manager TUI — main stylesheet */
-
+/* One accent marks interaction; neutral borders let filenames dominate. */
 Screen {
     layers: base overlay;
 }
 
-/* ── 4-zone grid ───────────────────────────────────────────── */
+#library-header {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    color: $text;
+    text-style: bold;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* A fixed compact preview leaves the remaining rows available for browsing. */
+TopDisplayWidget {
+    border: round $panel-lighten-2;
+    border-title-color: $text;
+    height: 7;
+    padding: 0 1;
+    overflow: hidden hidden;
+}
+TopDisplayWidget .meta-row {
+    height: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+TopDisplayWidget .meta-label { color: $text-muted; }
+TopDisplayWidget .waveform-display {
+    height: 4;
+    width: 1fr;
+    color: $accent;
+}
+.compact TopDisplayWidget { height: 6; }
+.compact TopDisplayWidget .waveform-display { height: 3; }
 
 #main-grid {
     layout: grid;
-    grid-size: 2 2;
-    grid-columns: 3fr 1fr;
-    grid-rows: 2fr 3fr;
+    grid-size: 2 1;
+    grid-columns: 2fr 1fr;
+    grid-rows: 1fr;
     height: 1fr;
 }
+.narrow #main-grid { grid-columns: 1fr 28; }
 
-/* ── Zone 1: Top Display (white border, top-left) ─────────── */
-
-TopDisplayWidget {
-    border: solid white;
-    border-title-align: left;
+BrowserZone, SelectedFilesListWidget {
+    border: round $panel-lighten-2;
+    border-title-color: $text-muted;
     height: 1fr;
     padding: 0 1;
-    overflow: hidden scroll;
 }
-
-TopDisplayWidget .meta-row {
-    height: 1;
-    color: $text;
+BrowserZone { layout: vertical; }
+TopDisplayWidget.active-pane, BrowserZone.active-pane, SelectedFilesListWidget.active-pane {
+    border: round $accent;
+    border-title-color: $accent;
 }
-
-TopDisplayWidget .meta-label {
-    color: $text-muted;
-}
-
-TopDisplayWidget .waveform-display {
-    height: 5;
-    width: 1fr;
-    color: $success;
-}
-
-/* ── Zone 2: Session Summary (blue border, top-right) ─────── */
-
-SessionSummaryWidget {
-    border: solid $primary;
-    border-title-align: left;
-    height: 1fr;
-    padding: 1 2;
-}
-
-SessionSummaryWidget .summary-row {
-    height: 1;
-    color: $text;
-}
-
-SessionSummaryWidget .summary-label {
-    color: $text-muted;
-}
-
-/* ── Zone 3: Browser Zone (orange border, bottom-left) ────── */
-
-BrowserZone {
-    border: solid $warning;
-    border-title-align: left;
-    height: 1fr;
-    layout: vertical;
-}
-
-BrowserZone.active-pane {
-    border: heavy $warning;
-}
-
-/* ── Zone 3a: Filters Panel (red border, fixed strip) ─────── */
-
 FiltersPanel {
-    border: solid $error;
-    border-title-align: left;
-    height: 3;
-    padding: 0 1;
-}
-
-FiltersPanel .filter-text {
     height: 1;
-    color: $warning;
-}
-
-FiltersPanel .filter-empty {
-    height: 1;
+    margin-bottom: 1;
     color: $text-muted;
 }
-
-/* ── Zone 3b: Sample List (green border, fills rest) ──────── */
-
+FiltersPanel.search-active {
+    background: $boost;
+    color: $accent;
+}
+FiltersPanel Static {
+    height: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
 SampleListWidget {
-    border: solid $success;
-    border-title-align: left;
+    border: none;
     height: 1fr;
-    padding: 0 1;
+    padding: 0;
 }
-
-SampleListWidget .file-row {
+SampleListWidget .file-row, SelectedFilesListWidget .sel-item {
     height: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
 }
-
-/* ── Zone 4: Selected Files List (purple border, bottom-right) */
-
-SelectedFilesListWidget {
-    border: solid $accent;
-    border-title-align: left;
-    height: 1fr;
-    padding: 0 1;
+/* An inactive Browser retains its cursor without competing with Stage focus. */
+.cursor-row { background: $boost; }
+.active-pane .cursor-row {
+    background: $accent;
+    color: $background;
+    text-style: bold;
 }
-
-SelectedFilesListWidget .sel-item {
-    height: 1;
-    color: $success;
-}
-
 SelectedFilesListWidget .sel-hint {
-    height: 1;
+    height: auto;
     color: $text-muted;
+    margin-top: 1;
 }
 
-SelectedFilesListWidget.active-pane {
-    border: heavy $accent;
-}
-
-/* ── Status bar (docked bottom, 1 line) ───────────────────── */
-
-#status-bar {
-    dock: bottom;
+#status-bar, #shortcut-bar {
     height: 1;
-    background: $accent-darken-2;
-    color: $text;
     padding: 0 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
 }
+#status-bar { color: $text-muted; }
+#shortcut-bar { background: $panel; color: $text; }
 
-/* ── HelpScreen modal ──────────────────────────────────────── */
-
-HelpScreen {
-    align: center middle;
+/* Share dialog framing while preserving each screen's dimensions/scrolling. */
+ActionPane Vertical, HelpScreen .help-container,
+#tui-settings, #add-library-dialog, #sample-tags-dialog, #commands-dialog {
+    border: round $accent;
+    background: $surface;
 }
-
+HelpScreen { align: center middle; }
 HelpScreen .help-container {
-    width: 64;
+    width: 72;
     max-width: 95%;
     height: auto;
     max-height: 90%;
-    border: double $accent;
     padding: 1 2;
-    background: $surface;
 }
+HelpScreen .help-title { text-style: bold; color: $accent; }
+HelpScreen .help-category { text-style: bold; color: $text; }
+HelpScreen .help-row { color: $text-muted; }
+HelpScreen .help-spacer { height: 1; }
+HelpScreen .help-hint { color: $text-muted; text-style: italic; }
 
-HelpScreen .help-title {
-    text-style: bold;
-    color: $warning;
+/* Musical context stays compact beside the waveform; i exposes all metadata. */
+TopDisplayWidget .embedded-panel {
+    dock: right;
+    width: 48%;
+    height: 1fr;
+    border-left: solid $panel-lighten-2;
+    padding-left: 1;
+    margin-left: 1;
+    overflow-x: hidden;
 }
-
-HelpScreen .help-category {
-    text-style: bold;
-    color: $text;
-}
-
-HelpScreen .help-row {
-    color: $text-muted;
-}
-
-HelpScreen .help-spacer {
+.embedded-title {
     height: 1;
+    text-style: bold;
+    color: $accent;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
 }
-
-HelpScreen .help-hint {
-    color: $text-muted;
-    text-style: italic;
+.embedded-values {
+    height: auto;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+    color: $text;
 }

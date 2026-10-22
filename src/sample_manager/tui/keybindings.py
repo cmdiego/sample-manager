@@ -40,9 +40,23 @@ KEYMAP: dict[str, str] = {
     "f5": "rescan_library",
     "f6": "edit_tags",
     "t": "edit_tags",
+    "i": "show_metadata",
+    "n": "stage_new_folder",
+    "f7": "stage_new_folder",
+    "m": "stage_move",
+    "e": "stage_rename",
     # Filter / search
     "slash": "activate_filter",
     "escape": "cancel_or_back",
+    # Directional pane focus is separate from directory traversal.
+    "ctrl+h": "focus_pane_left",
+    "ctrl+left": "focus_pane_left",
+    "ctrl+j": "focus_pane_down",
+    "ctrl+down": "focus_pane_down",
+    "ctrl+k": "focus_pane_up",
+    "ctrl+up": "focus_pane_up",
+    "ctrl+l": "focus_pane_right",
+    "ctrl+right": "focus_pane_right",
     # Pane focus cycling
     "tab": "cycle_pane_focus",
     "r": "next_library_root",
@@ -72,10 +86,10 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "go_back": "Go back / ascend directory",
     "move_up": "Move cursor up",
     "move_down": "Move cursor down",
-    "enter": "Open action pane",
-    "select_or_descend": "Select file / descend into directory",
-    "add_to_selection": "Add focused item to selection",
-    "remove_from_selection": "Remove focused item from selection",
+    "enter": "Enter folder / open sample actions",
+    "select_or_descend": "Toggle Stage / descend into directory",
+    "add_to_selection": "Add focused item to Stage",
+    "remove_from_selection": "Remove Stage sample or empty folder",
     "toggle_playback": "Pause / resume or play focused sample",
     "resume_playback": "Resume paused sample from checkpoint",
     "waveform_nav_enter": "Enter waveform navigation",
@@ -95,7 +109,15 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "add_library": "Add and index a sample folder",
     "rescan_library": "Rescan the active library in the background",
     "edit_tags": "Edit tags for the focused sample",
+    "show_metadata": "Inspect directory contents / sample metadata",
+    "stage_new_folder": "Create Stage folder or nested path",
+    "stage_move": "Move a Stage sample or folder",
+    "stage_rename": "Rename a Stage folder",
     "cancel_or_back": "Cancel filter / go back",
+    "focus_pane_left": "Focus pane left",
+    "focus_pane_down": "Focus pane down",
+    "focus_pane_up": "Focus pane up",
+    "focus_pane_right": "Focus pane right",
     "cycle_pane_focus": "Switch Browser / Stage",
     "next_library_root": "Switch to next library root",
     "command_palette": "Open command palette",
@@ -104,7 +126,8 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
 # Groupings for the HelpScreen display (order preserved).
 ACTION_CATEGORIES: dict[str, list[str]] = {
     "Navigation": ["move_up", "move_down", "go_back", "select_or_descend", "enter"],
-    "Selection": ["add_to_selection", "remove_from_selection", "edit_tags"],
+    "Pane focus": ["focus_pane_left", "focus_pane_down", "focus_pane_up", "focus_pane_right"],
+    "Stage & tags": ["add_to_selection", "remove_from_selection", "edit_tags", "show_metadata", "stage_new_folder", "stage_move", "stage_rename"],
     "Playback": [
         "toggle_playback",
         "resume_playback",
@@ -142,7 +165,8 @@ COMMAND_GROUPS: tuple[CommandGroup, ...] = (
         ("o", "enter"), ("e", "select_or_descend"), ("p", "cycle_pane_focus"),
     )),
     CommandGroup("s", "Stage & tags", (
-        ("a", "add_to_selection"), ("d", "remove_from_selection"), ("t", "edit_tags"),
+        ("a", "add_to_selection"), ("d", "remove_from_selection"), ("t", "edit_tags"), ("i", "show_metadata"),
+        ("n", "stage_new_folder"), ("m", "stage_move"), ("e", "stage_rename"),
     )),
     CommandGroup("p", "Playback", (
         ("p", "toggle_playback"), ("r", "resume_playback"), ("w", "waveform_nav_enter"),
@@ -158,6 +182,10 @@ COMMAND_GROUPS: tuple[CommandGroup, ...] = (
     )),
     CommandGroup("l", "Libraries", (
         ("a", "add_library"), ("r", "rescan_library"), ("n", "next_library_root"),
+    )),
+    CommandGroup("v", "Pane focus", (
+        ("h", "focus_pane_left"), ("j", "focus_pane_down"),
+        ("k", "focus_pane_up"), ("l", "focus_pane_right"),
     )),
     CommandGroup("a", "App & help", (
         ("s", "show_settings"), ("h", "show_help"),

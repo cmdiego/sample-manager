@@ -1,4 +1,4 @@
-"""Filters Panel widget — shows active filter/search state (Zone 3a, red border)."""
+"""Integrated search strip showing query and result counts."""
 
 from __future__ import annotations
 
@@ -15,33 +15,34 @@ class FiltersPanel(Widget):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.border_title = "Filter"
+        self.border_title = "Search"
         self._query = ""
 
     def compose(self) -> ComposeResult:
-        yield Static("  (no filter active)", classes="filter-empty", id="filter-text")
+        yield Static("/ Search name, path, or tag", classes="filter-empty", id="filter-text")
 
     def update_filter(
         self, query: str, *, active: bool = False, count: int | None = None,
     ) -> None:
         """Show the actual query separately from the shortcut that opens it."""
         self._query = query
+        self.set_class(active, "search-active")
         label = self.query_one("#filter-text", Static)
         if query:
             self.border_title = f"Search — {escape(query)}"
             matches = f" · {count}{'+' if count == 500 else ''} matches" if count is not None else ""
             label.update(
-                f"  [bold yellow]{escape(query)}[/bold yellow]{matches} · ↑/↓ results · Esc clear"
+                f"  [bold]{escape(query)}[/bold]{matches}"
             )
             label.set_class(True, "filter-text")
             label.set_class(False, "filter-empty")
         elif active:
             self.border_title = "Search library"
-            label.update("  Type a name, path, or tag · Shift+Space for space · Esc cancel")
+            label.update("Type a name, path, or tag…")
             label.set_class(True, "filter-text")
             label.set_class(False, "filter-empty")
         else:
-            self.border_title = "Filter"
-            label.update("  (no filter active)")
+            self.border_title = "Search"
+            label.update("/ Search name, path, or tag")
             label.set_class(False, "filter-text")
             label.set_class(True, "filter-empty")

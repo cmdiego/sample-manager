@@ -122,6 +122,11 @@ per line to stdout. Example:
 {"assert": "path", "relative": "drums"}
 ```
 
+The terminal workspace puts a compact waveform Preview above Browser and Stage.
+Stage shows the selected sample count and total size in its header; the bottom
+bar follows Browser, Stage, search, and waveform seeking modes. Short terminals
+use a smaller preview to keep more sample rows visible.
+
 For the keyboard-driven terminal interface:
 
 ```bash
@@ -141,9 +146,30 @@ Dialog text fields accept `\` normally;
 paste a query if you need a literal backslash in search. **?** opens the full
 shortcut reference, including waveform controls.
 
+Directory navigation follows Vim in Browser and Stage: **h / Left** goes to
+the parent, **j / Down** moves down, **k / Up** moves up, and **l / Right** opens
+the focused folder. On a sample, **l / Right** keeps its action menu. Ascending
+highlights the folder you just left; reentering a visited folder restores its
+last focused item and scrolls it into view. If that item was removed, the cursor
+falls back to the nearest remaining row. Newly entered Stage folders focus their
+first actual child, allowing repeated **l** to descend through several levels.
+**h** stops at the active pane’s root. **Tab** switches panes; **Escape** at Stage
+root returns to Browser. The directory inspector opened with **i** also accepts
+**hjkl** for tree navigation. In that directory tree, **Enter** toggles an indexed
+sample in Stage, **a** adds it, and **d** removes it. **[✓]** marks staged samples;
+additions use the currently open Stage folder. Enter on folders still expands
+or collapses them. Search and dialog text fields accept these letters
+as text; waveform navigation after **w** retains **h/l** for seeking.
+
+Use **Ctrl+h/j/k/l** or **Ctrl+Left/Down/Up/Right** to focus the pane in
+that direction. Left/right switch Browser and Stage; up focuses the shared
+Preview; down returns to its originating pane. Movement stops at outer edges.
+In Preview, **h/l** seek, **j/k** scroll sample details, **Enter** confirms a seek,
+and **Escape** returns without seeking. **Tab** still switches Browser/Stage.
+
 In the TUI, press **Tab** to switch between Browser and the selected-files
 Stage. **j/k** or the arrow keys move in the active pane; **Return** or **d**
-removes the highlighted Stage sample. Press **r** to cycle indexed library
+removes the highlighted Stage sample; **Return** opens a Stage folder. Press **r** to cycle indexed library
 roots. The TUI opens the configured default root at startup, and Stage remains
 available when switching roots. Press **F5** (or choose **Rescan Library** in the
 command palette) to pick up added, changed, or removed files. Scanning runs in
@@ -154,6 +180,28 @@ Use **F4 Add Folder** (also in the command palette) to index another library.
 Paths may include spaces, `~`, or environment variables. The chosen library is
 saved as the startup default after a successful scan; existing Stage items stay
 selected when adding or switching libraries.
+
+Stage supports persistent **virtual folders and subfolders**. Press **n** or
+**F7** to create a folder; enter `Drums/Kicks` to create a nested path. Relative
+paths start inside the open Stage folder; a leading `/` starts at Stage root.
+Creating a folder opens it in Stage. Use **Tab** to return to Browser and add
+samples with **Enter** or **a**; new selections go into the open Stage folder.
+Adding an already-staged sample preserves its existing placement.
+
+In Stage, **Enter**, **l** or **Right** opens a folder; **h** or **Left** returns to its parent,
+and **m** moves the focused sample or folder to a destination path (`/` for
+root). Missing destination folders are created automatically. **e** renames a
+folder. **d** removes a sample from Stage or removes an empty virtual folder;
+nonempty folders require moving their contents out first. **Escape** cancels a
+folder dialog. The Stage footer shows the current destination path, and its
+header totals include samples across all Stage folders and libraries.
+
+Folders and sample placement survive restart and library switching. These
+operations organize references and leave source audio files in place. The
+shared CLI/GUI selection still contains all staged sample IDs. Creating or
+adding an arrangement with `--from-selection` carries over the folder hierarchy;
+arrangement preview and export use those folders. `sampleman selection clear`
+clears both selections and virtual folders.
 
 Press **F2** for **Settings**, or find Settings in the **Ctrl+P** command
 palette. Choose an audio output device or disable playback, and turn automatic
@@ -168,6 +216,22 @@ results, and **Return** to toggle a sample in Stage. **Escape** or **Left** clea
 search and restores the directory cursor. Deleting the query keeps search open.
 **Space** controls playback; **Shift+Space** inserts a space in the query.
 Relative folders distinguish results that share a filename.
+
+Press **i** on a focused directory to inspect its contents in an expandable tree.
+The listing includes files of every type and subdirectories. **Enter** or **Right**
+expands a folder; **Left** collapses it or moves to its parent; **Escape**, **i**,
+or **q** closes the inspector and preserves Browser/Stage state. Nested folders
+load in the background when expanded. Symbolic links are listed as leaves.
+
+Preview’s top-right **Sample details** panel prioritizes **Tempo**, **Key**,
+**Genre**, and your assigned **Tags**, followed by available file tags, artist,
+title, and album. Tempo/key/genre come from the sample’s embedded metadata;
+missing values display **—** and are not guessed from the filename. Your tag
+edits update the summary immediately. Scroll to additional summary fields when
+needed. Press **i** on a sample for its full, scrollable metadata, including
+custom fields, technical audio properties, artwork summaries, and separately
+labeled library tags. **Escape** closes the view. Native metadata is read-only
+and requires the optional `audio` extra (`pip install "sample-manager[audio]"`).
 
 Press **F6** or **t** to manage tags on the focused sample in Browser or Stage,
 or choose **Edit tags** from its action pane. Enter a tag name or existing alias
@@ -301,6 +365,18 @@ sampleman tag bulk --from-search drum --add percussion
 sampleman tag alias add kick k
 sampleman tag parent add kick drum
 ```
+
+To make `kick` a sub-tag of `drums`, first create both tags by adding them
+to samples with **t** in the TUI (or `sampleman tag add SAMPLE_ID TAG`). Then run:
+
+```bash
+sampleman tag parent add kick drums
+```
+
+The child comes first, then its parent. Parent relationships are currently
+managed through the CLI; the TUI tag editor manages sample attachments.
+`sampleman search --tag drums` includes descendants such as `kick`. The TUI’s
+`/` search currently matches tag text directly.
 
 Work with profiles:
 

@@ -148,7 +148,7 @@ class TestTopDisplayWidget:
              patch("sample_manager.tui.widgets.top_display.Static") as mock_static:
             widget.update_focus(item, None)
         text = _all_static_texts(mock_static)
-        assert "not indexed" in text
+        assert "not indexed" in text.lower()
 
     def test_update_focus_file_with_details_sets_preview_title(self):
         widget = TopDisplayWidget()
@@ -189,8 +189,8 @@ class TestTopDisplayWidget:
              patch("sample_manager.tui.widgets.top_display.Static") as mock_static:
             widget.update_focus(item, details)
         text = _all_static_texts(mock_static)
-        assert "drums" in text
-        assert "kick" in text
+        assert widget.metadata_panel.library_tags == ("drums", "kick")
+        assert "Tags: drums · kick" in widget.metadata_panel._text.content
 
     def test_update_focus_file_with_details_shows_sample_id(self):
         widget = TopDisplayWidget()
@@ -212,9 +212,9 @@ class TestTopDisplayWidget:
 class TestFiltersPanel:
     """Tests for FiltersPanel.update_filter()."""
 
-    def test_default_border_title_is_filter(self):
+    def test_default_border_title_is_search(self):
         panel = FiltersPanel()
-        assert panel.border_title == "Filter"
+        assert panel.border_title == "Search"
 
     def test_default_query_is_empty(self):
         panel = FiltersPanel()
@@ -225,14 +225,14 @@ class TestFiltersPanel:
         mock_label = MagicMock()
         with patch.object(panel, "query_one", return_value=mock_label):
             panel.update_filter("")
-        assert panel.border_title == "Filter"
+        assert panel.border_title == "Search"
 
     def test_update_filter_empty_string_shows_placeholder(self):
         panel = FiltersPanel()
         mock_label = MagicMock()
         with patch.object(panel, "query_one", return_value=mock_label):
             panel.update_filter("")
-        mock_label.update.assert_called_once_with("  (no filter active)")
+        mock_label.update.assert_called_once_with("/ Search name, path, or tag")
 
     def test_update_filter_non_empty_updates_border_title(self):
         panel = FiltersPanel()
@@ -263,7 +263,7 @@ class TestFiltersPanel:
             panel.update_filter("hat")
         with patch.object(panel, "query_one", return_value=mock_label):
             panel.update_filter("")
-        assert panel.border_title == "Filter"
+        assert panel.border_title == "Search"
         assert panel._query == ""
 
 
@@ -359,7 +359,7 @@ class TestSelectedFilesListWidget:
 
     def test_default_border_title_shows_zero(self):
         widget = SelectedFilesListWidget()
-        assert widget.border_title == "Selected Files (0)"
+        assert widget.border_title == "Stage · 0 · 0 B"
 
     def test_update_empty_list_keeps_zero_in_title(self):
         widget = SelectedFilesListWidget()
@@ -367,7 +367,7 @@ class TestSelectedFilesListWidget:
              patch.object(widget, "mount"), \
              patch("sample_manager.tui.widgets.selection_list.Static"):
             widget.update([])
-        assert widget.border_title == "Selected Files (0)"
+        assert widget.border_title == "Stage · 0 · 0 B"
 
     def test_update_empty_list_mounts_hint(self):
         widget = SelectedFilesListWidget()
@@ -385,7 +385,7 @@ class TestSelectedFilesListWidget:
              patch.object(widget, "mount"), \
              patch("sample_manager.tui.widgets.selection_list.Static"):
             widget.update(items)
-        assert widget.border_title == "Selected Files (2)"
+        assert widget.border_title == "Stage · 2 · 0 B"
 
     def test_update_non_empty_list_mounts_filenames(self):
         widget = SelectedFilesListWidget()

@@ -56,12 +56,12 @@ class ActionPane(ModalScreen):
             yield Static(meta, classes="action-meta")
             if item.sample_id is not None:
                 if self._is_selected:
-                    yield Button("Remove from selection  [d]", id="remove", variant="warning")
+                    yield Button("Remove from Stage  [d]", id="remove", variant="warning")
                 else:
-                    yield Button("Add to selection  [a]", id="add", variant="success")
+                    yield Button("Add to Stage  [a]", id="add", variant="success")
                 yield Button("Edit tags  [t]", id="tags")
             else:
-                yield Static("(not indexed — run `sample scan` first)", classes="action-meta")
+                yield Static("(not indexed — press F5 to rescan library)", classes="action-meta")
             yield Static("ESC to close", classes="action-hint")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

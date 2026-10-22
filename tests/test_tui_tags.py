@@ -89,7 +89,7 @@ def test_tags_resolve_aliases_and_preserve_literal_names(tag_env):
             await _add_tag(app, pilot, "Warm [red], Lo-Fi")
             assert app.test_data.get_sample_details(kick)["tags"] == ["Drums", "Warm [red], Lo-Fi"]
             preview_text = " ".join(str(widget.content) for widget in app.query_one(TopDisplayWidget).query(Static))
-            assert r"Warm \[red], Lo-Fi" in preview_text
+            assert "Tags: Drums · Warm [red], Lo-Fi" in preview_text
 
             app.screen.query_one(OptionList).highlighted = 0
             await pilot.click("#sample-tag-remove")

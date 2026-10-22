@@ -37,9 +37,12 @@ class SelectionRepo:
 
     def clear(self) -> int:
         """Clear the entire selection buffer."""
-        cursor = self._db.execute("DELETE FROM selection_sample")
-        self._db.conn.commit()
-        return cursor.rowcount
+        # Clearing Stage removes virtual folders too, after their placements.
+        with self._db.transaction():
+            cursor = self._db.execute("DELETE FROM selection_sample")
+            removed = cursor.rowcount
+            self._db.execute("DELETE FROM stage_folder WHERE parent_id IS NULL")
+        return removed
 
     def list_samples(self) -> list[dict]:
         """List selected samples with stable sample columns."""

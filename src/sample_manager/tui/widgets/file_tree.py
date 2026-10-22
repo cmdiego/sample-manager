@@ -52,11 +52,15 @@ class SampleListWidget(VerticalScroll):
             return
 
         rows = [
-            Static(_format_item(item, focused=(i == state.focused_index)), classes="file-row")
+            Static(
+                _format_item(item, focused=(i == state.focused_index)),
+                classes="file-row" + (" cursor-row" if i == state.focused_index else ""),
+            )
             for i, item in enumerate(state.items)
         ]
         self.mount(*rows)
-        self._scroll_to_focused()
+        # Follow the new rows after mount/layout, not the outgoing listing.
+        self.call_after_refresh(self._scroll_to_focused)
 
         # Fire CursorMoved when the focused item changes
         if state.focused_index != prev_index and state.focused_item is not None:
@@ -64,12 +68,13 @@ class SampleListWidget(VerticalScroll):
         self._prev_focused_index = state.focused_index
 
     def _scroll_to_focused(self) -> None:
+        """Keep keyboard focus visible after directory changes or fast movement."""
         idx = self._state.focused_index
         if idx < 0:
             return
         rows = list(self.query(".file-row"))
         if idx < len(rows):
-            self.scroll_to_widget(rows[idx])
+            self.scroll_to_widget(rows[idx], animate=False, immediate=True)
 
 
 # Backward-compat alias
@@ -85,10 +90,10 @@ def _format_item(item: NavItem, focused: bool = False) -> str:
         text = f"{cursor} {name}/"
         return f"[bold]{text}[/bold]" if focused else text
 
-    check = "[green]✓[/green] " if item.is_selected else "  "
-    indexed_tag = f" [dim]#{item.sample_id}[/dim]" if item.sample_id is not None else " [dim](not indexed)[/dim]"
+    check = "✓ " if item.is_selected else "  "
+    indexed_tag = "" if item.sample_id is not None else " [dim](not indexed)[/dim]"
     # Search may show identical filenames from several packs; include the
     # relative parent while keeping the actual filename and path unchanged.
     context = f" [dim]— {escape(item.context)}[/dim]" if item.context else ""
     text = f"{cursor} {check}{name}{context}{indexed_tag}"
-    return f"[bold reverse]{text}[/bold reverse]" if focused else text
+    return f"[bold]{text}[/bold]" if focused else text

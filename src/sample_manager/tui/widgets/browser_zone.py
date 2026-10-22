@@ -1,4 +1,4 @@
-"""Browser Zone widget — container for FiltersPanel + SampleListWidget (Zone 3, orange border)."""
+"""Browser pane with an integrated search strip and directory listing."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from .file_tree import SampleListWidget
 
 
 class BrowserZone(Widget):
-    """Vertical container: FiltersPanel (red strip) above SampleListWidget (green list)."""
+    """Single bordered pane containing search and the scrollable sample list."""
 
     DEFAULT_CSS = ""  # all CSS lives in styles/app.tcss
 
