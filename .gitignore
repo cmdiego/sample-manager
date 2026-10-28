@@ -35,3 +35,6 @@ GEMINI.md
 /docs/appendix-phase2-ddl-and-ctes.md
 /specs/
 /dev_docs/session-*.md
+
+# Local native-engine compilation (CI may override CARGO_TARGET_DIR).
+/engine/target/

@@ -62,6 +62,13 @@ KEYMAP: dict[str, str] = {
     "r": "next_library_root",
     # Command palette
     "ctrl+p": "command_palette",
+    "alt+left": "focus_columns",
+    "alt+1": "view_browse",
+    "alt+2": "view_search",
+    "alt+3": "view_stage",
+    "alt+4": "show_arrangements",
+    "alt+t": "stage_tag_all",
+    "alt+c": "stage_clear",
 }
 
 # These bindings override browsing only while the waveform cursor is active.
@@ -121,13 +128,20 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "cycle_pane_focus": "Switch Browser / Stage",
     "next_library_root": "Switch to next library root",
     "command_palette": "Open command palette",
+    "stage_tag_all": "Attach a tag to all staged samples",
+    "stage_clear": "Clear Stage with confirmation",
+    "show_arrangements": "Open arrangements, preview, export and history",
+    "view_browse": "Browse view",
+    "view_search": "Search view",
+    "view_stage": "Stage view and bulk actions",
+    "focus_columns": "Focus folder/tag columns; Alt+Right switches column",
 }
 
 # Groupings for the HelpScreen display (order preserved).
 ACTION_CATEGORIES: dict[str, list[str]] = {
-    "Navigation": ["move_up", "move_down", "go_back", "select_or_descend", "enter"],
+    "Navigation": ["focus_columns", "move_up", "move_down", "go_back", "select_or_descend", "enter"],
     "Pane focus": ["focus_pane_left", "focus_pane_down", "focus_pane_up", "focus_pane_right"],
-    "Stage & tags": ["add_to_selection", "remove_from_selection", "edit_tags", "show_metadata", "stage_new_folder", "stage_move", "stage_rename"],
+    "Stage & tags": ["stage_tag_all", "stage_clear", "add_to_selection", "remove_from_selection", "edit_tags", "show_metadata", "stage_new_folder", "stage_move", "stage_rename"],
     "Playback": [
         "toggle_playback",
         "resume_playback",
@@ -144,7 +158,7 @@ ACTION_CATEGORIES: dict[str, list[str]] = {
         "waveform_nav_exit",
     ],
     "Filter": ["activate_filter", "cancel_or_back"],
-    "App": ["show_commands", "quit", "show_help", "show_settings", "add_library", "rescan_library", "cycle_pane_focus", "next_library_root", "command_palette"],
+    "App": ["view_browse", "view_search", "view_stage", "show_arrangements", "show_commands", "quit", "show_help", "show_settings", "add_library", "rescan_library", "cycle_pane_focus", "next_library_root", "command_palette"],
 }
 
 
@@ -162,10 +176,10 @@ class CommandGroup:
 COMMAND_GROUPS: tuple[CommandGroup, ...] = (
     CommandGroup("n", "Navigation", (
         ("u", "move_up"), ("d", "move_down"), ("b", "go_back"),
-        ("o", "enter"), ("e", "select_or_descend"), ("p", "cycle_pane_focus"),
+        ("o", "enter"), ("e", "select_or_descend"), ("p", "cycle_pane_focus"), ("c", "focus_columns"),
     )),
     CommandGroup("s", "Stage & tags", (
-        ("a", "add_to_selection"), ("d", "remove_from_selection"), ("t", "edit_tags"), ("i", "show_metadata"),
+        ("a", "add_to_selection"), ("d", "remove_from_selection"), ("t", "edit_tags"), ("i", "show_metadata"), ("r", "show_arrangements"), ("b", "stage_tag_all"), ("c", "stage_clear"),
         ("n", "stage_new_folder"), ("m", "stage_move"), ("e", "stage_rename"),
     )),
     CommandGroup("p", "Playback", (
@@ -186,6 +200,7 @@ COMMAND_GROUPS: tuple[CommandGroup, ...] = (
     CommandGroup("v", "Pane focus", (
         ("h", "focus_pane_left"), ("j", "focus_pane_down"),
         ("k", "focus_pane_up"), ("l", "focus_pane_right"),
+        ("b", "view_browse"), ("s", "view_search"), ("t", "view_stage"),
     )),
     CommandGroup("a", "App & help", (
         ("s", "show_settings"), ("h", "show_help"),

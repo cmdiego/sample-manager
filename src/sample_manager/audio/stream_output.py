@@ -41,8 +41,10 @@ class StreamingSoundDeviceOutput:
         latency: float | str = DEFAULT_LATENCY_SECONDS,
         samplerate: int | None = None,
         channels: int | None = None,
+        blocksize: int = 0,
     ) -> None:
         self._device = device
+        self._blocksize = blocksize
         self._latency = latency
         self._requested_rate = samplerate
         self._requested_channels = channels
@@ -70,7 +72,25 @@ class StreamingSoundDeviceOutput:
         start_frame: int,
         on_complete: Callable[[], None],
     ) -> None:
+        """Prepare and publish a voice unless a newer lifecycle command wins."""
+        self.start_if_current(audio, start_frame, on_complete, lambda: True)
+
+    def start_if_current(
+        self,
+        audio: DecodedAudio | StreamingSource,
+        start_frame: int,
+        on_complete: Callable[[], None],
+        is_current: Callable[[], bool],
+    ) -> None:
+        """Bridge player cancellation before registration and during preparation.
+
+        The predicate must be quick and must not call back into this output.
+        It is checked under the publication lock so pause cannot overtake play.
+        """
+        requested_at = time.perf_counter()
         with self._lock:
+            if self._closed.is_set() or not is_current():
+                return
             mixer = self._ensure_stream()
             self._next_token += 1
             token = self._next_token
@@ -83,42 +103,59 @@ class StreamingSoundDeviceOutput:
             audio = decode(audio.path)
 
         fill = None
-        if isinstance(audio, StreamingSource):
-            fill = StreamFill(
-                audio,
-                start_frame,
-                token=token,
-                device_rate=mixer.sample_rate,
-                device_channels=mixer.channels,
-            )
-            fill.fill_first_block()
-            voice, ratio = fill.voice, fill.ratio
-        else:
-            pcm = self._conformed_pcm(audio, mixer)
-            ratio = mixer.sample_rate / audio.sample_rate
-            device_frames = int(pcm.shape[0])
-            cursor = max(0, min(round(int(start_frame) * ratio), device_frames))
-            voice = Voice(token=token, pcm=pcm, cursor=cursor)
+        try:
+            if isinstance(audio, StreamingSource):
+                fill = StreamFill(
+                    audio,
+                    start_frame,
+                    token=token,
+                    device_rate=mixer.sample_rate,
+                    device_channels=mixer.channels,
+                )
+                fill.fill_first_block()
+                voice, ratio = fill.voice, fill.ratio
+            else:
+                pcm = self._conformed_pcm(audio, mixer)
+                ratio = mixer.sample_rate / audio.sample_rate
+                device_frames = int(pcm.shape[0])
+                cursor = max(0, min(round(int(start_frame) * ratio), device_frames))
+                voice = Voice(token=token, pcm=pcm, cursor=cursor)
 
-        with self._lock:
-            previous_fill = self._fill
-            self._fill = fill
-            # Only the newest voice can complete; superseded ones fade out.
-            self._callbacks = {voice.token: on_complete}
-            self._current = voice
-            self._last_voice = voice
-            self._ratio = ratio
-            self._started_at = time.perf_counter()
-        if previous_fill is not None:
-            previous_fill.cancel()
-        # Starting at the top of a sample keeps its transient intact; resuming
-        # or seeking mid-file fades in to avoid a click.
-        mixer.play(voice, fade_in=voice.cursor > 0)
-        if fill is not None:
-            fill.start_background()
+            with self._lock:
+                # Preparation may finish after pause, replacement, or shutdown.
+                # Queue play while holding the same lock as stop/invalidation.
+                accepted = (
+                    token == self._next_token and not self._closed.is_set() and is_current()
+                )
+                if accepted:
+                    previous_fill = self._fill
+                    self._fill = fill
+                    self._callbacks = {voice.token: on_complete}
+                    self._current = voice
+                    self._last_voice = voice
+                    self._ratio = ratio
+                    self._started_at = requested_at
+                    mixer.play(voice, fade_in=voice.cursor > 0)
+                    # Launch before publication unlocks so close cannot miss the worker.
+                    if fill is not None:
+                        fill.start_background()
+            if not accepted:
+                # Close unpublished file handles outside the lifecycle lock.
+                if fill is not None:
+                    fill.discard()
+                return
+            if previous_fill is not None:
+                previous_fill.cancel()
+        except Exception:
+            # First-block failures have no background worker to close the file.
+            if fill is not None:
+                fill.discard()
+            raise
 
     def pause(self) -> int:
+        """Invalidate pending starts and enqueue a fade without device I/O."""
         with self._lock:
+            self._next_token += 1
             voice = self._current
             self._current = None
             fill = self._fill
@@ -128,10 +165,10 @@ class StreamingSoundDeviceOutput:
                 self._callbacks.pop(voice.token, None)
             mixer = self._mixer
             position = self._position
+            if voice is not None and mixer is not None:
+                mixer.stop(voice)
         if fill is not None:
             fill.cancel()
-        if voice is not None and mixer is not None:
-            mixer.stop(voice)
         return position
 
     def position_frames(self) -> int:
@@ -140,7 +177,10 @@ class StreamingSoundDeviceOutput:
             return self._source_frames(voice) if voice is not None else self._position
 
     def close(self) -> None:
+        """Permanently reject starts before detaching and closing the stream."""
         with self._lock:
+            self._closed.set()
+            self._next_token += 1
             stream = self._stream
             self._stream = None
             self._mixer = None
@@ -153,7 +193,6 @@ class StreamingSoundDeviceOutput:
             # A block takes milliseconds; waiting lets the fill release its
             # file and resampler before the interpreter shuts down.
             fill.join(timeout=1.0)
-        self._closed.set()
         if stream is not None:
             stream.stop()
             stream.close()
@@ -162,6 +201,11 @@ class StreamingSoundDeviceOutput:
             thread.join(timeout=1.0)
 
     # -- diagnostics -------------------------------------------------------------
+
+    def playback_error(self) -> str | None:
+        """Surface decoder-tail errors rather than reporting a normal completion."""
+        with self._lock:
+            return self._last_voice.error if self._last_voice is not None else None
 
     def stats(self) -> dict:
         """Report device format, buffering, xruns, and the last start latency."""
@@ -218,12 +262,12 @@ class StreamingSoundDeviceOutput:
             channels=channels,
             dtype="float32",
             latency=self._latency,
+            blocksize=self._blocksize,
             callback=callback,
         )
         stream.start()
         self._stream = stream
         self._mixer = mixer
-        self._closed.clear()
         if self._events_thread is None or not self._events_thread.is_alive():
             self._events_thread = threading.Thread(
                 target=self._dispatch_events,

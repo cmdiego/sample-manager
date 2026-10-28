@@ -17,6 +17,12 @@ def apply_plan(
     dry_run: bool,
 ) -> tuple[list[dict], list[str]]:
     """Apply plan operations and return per-op results + errors."""
+    # Reject path escapes before any operation, including symlinked parents.
+    root = export_dir.resolve()
+    for op in plan["operations"]:
+        destination = (root / op["dst_rel_path"]).resolve()
+        if destination == root or not destination.is_relative_to(root):
+            raise ValueError(f"Export path escapes destination: {op['dst_rel_path']}")
     results: list[dict] = []
     errors: list[str] = []
 
@@ -49,8 +55,10 @@ def apply_plan(
             results.append(result)
             continue
 
-        dst.parent.mkdir(parents=True, exist_ok=True)
         try:
+            # Directory creation is an operation failure too; retain earlier
+            # successes in history so a partial run can still be reverted.
+            dst.parent.mkdir(parents=True, exist_ok=True)
             if mode == "copy":
                 shutil.copy2(src, dst)
             elif mode == "symlink":

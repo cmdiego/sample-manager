@@ -44,12 +44,14 @@ class DecodeCache:
         decoder: Callable[[Path], DecodedAudio] = decode,
         max_bytes: int = DEFAULT_CACHE_BYTES,
         prefetch_max_file_bytes: int = DEFAULT_PREFETCH_MAX_FILE_BYTES,
+        prefetch_max_seconds: float = 10.0,
     ) -> None:
         if max_bytes <= 0:
             raise ValueError("max_bytes must be greater than zero")
         self._decoder = decoder
         self._max_bytes = max_bytes
         self._prefetch_max_file_bytes = prefetch_max_file_bytes
+        self._prefetch_max_seconds = prefetch_max_seconds
         self._lock = threading.Lock()
         self._entries: OrderedDict[_Key, DecodedAudio] = OrderedDict()
         self._bytes = 0
@@ -80,6 +82,9 @@ class DecodeCache:
             return future.result()
         try:
             audio = self._decoder(requested)
+            # A replacement during decode must not leak stale PCM to any consumer.
+            if _cache_key(requested) != key:
+                raise ValueError("Sample changed during decoding; retry audition")
         except BaseException as exc:
             with self._lock:
                 self._inflight.pop(key, None)
@@ -137,8 +142,17 @@ class DecodeCache:
                     return
                 path = self._wanted.pop(0)
             try:
-                if path.stat().st_size <= self._prefetch_max_file_bytes:
-                    self.get(path)
+                if path.stat().st_size > self._prefetch_max_file_bytes:
+                    continue
+                if self._decoder is decode:
+                    # Compressed size says little about PCM memory/CPU. Probe
+                    # duration and decoded bytes before admitting background work.
+                    from .backends import require
+                    info = require("soundfile").info(str(path))
+                    if (info.duration > self._prefetch_max_seconds or
+                            info.frames * info.channels * 4 > self._max_bytes // 4):
+                        continue
+                self.get(path)
             except Exception:  # noqa: BLE001 - a failed prefetch is retried on audition
                 continue
 

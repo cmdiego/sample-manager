@@ -12,7 +12,6 @@ the voice, and converts the rest in a background thread while the voice plays.
 
 from __future__ import annotations
 
-import math
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,8 +30,6 @@ STREAM_MIN_SECONDS = 10.0
 # larger to keep per-block overhead low. Both are in source frames.
 FIRST_BLOCK_FRAMES = 2048
 BLOCK_FRAMES = 32768
-# Slack for resampler rounding when sizing the device-rate buffer.
-_BUFFER_MARGIN_FRAMES = 64
 
 
 @dataclass(frozen=True)
@@ -85,7 +82,7 @@ class PlaybackSources:
 
 
 class StreamFill:
-    """Convert a :class:`StreamingSource` into a growing device-rate voice."""
+    """Convert a :class:`StreamingSource` into a bounded device-rate ring voice."""
 
     def __init__(
         self,
@@ -103,24 +100,33 @@ class StreamFill:
         self.ratio = device_rate / source.sample_rate
         start = max(0, min(int(start_frame), source.frames))
         offset = round(start * self.ratio)
-        capacity = offset + math.ceil((source.frames - start) * self.ratio) + _BUFFER_MARGIN_FRAMES
-        # np.empty reserves address space without touching it; pages are
-        # committed as the fill writes them.
+        # Half a second of device-rate PCM bounds memory independently of file
+        # duration and seek offset. Cursors remain absolute for player position.
+        capacity = max(4096, round(device_rate * 0.5))
         pcm = np.empty((capacity, device_channels), dtype="float32")
-        self.voice = Voice(token=token, pcm=pcm, cursor=offset, filled=offset, complete=False)
-        self._file = sf.SoundFile(str(source.path))
-        if start:
-            self._file.seek(start)
-        self._resampler = (
-            StreamResampler(source.sample_rate, device_rate, device_channels)
-            if source.sample_rate != device_rate else None
+        self.voice = Voice(
+            token=token, pcm=pcm, cursor=offset, filled=offset,
+            complete=False, circular=True,
         )
+        self._file = sf.SoundFile(str(source.path))
+        try:
+            if start:
+                self._file.seek(start)
+            self._resampler = (
+                StreamResampler(source.sample_rate, device_rate, device_channels)
+                if source.sample_rate != device_rate else None
+            )
+        except Exception:
+            # Constructor failures have no published owner to release the file.
+            self._file.close()
+            raise
         self._cancelled = threading.Event()
         self._thread: threading.Thread | None = None
 
     def fill_first_block(self) -> None:
         """Convert the first block on the calling thread, before playback starts."""
-        if self._step(FIRST_BLOCK_FRAMES):
+        frames = min(FIRST_BLOCK_FRAMES, max(1, int(len(self.voice.pcm) / self.ratio / 2)))
+        if self._step(frames):
             self._finish()
 
     def start_background(self) -> None:
@@ -134,6 +140,14 @@ class StreamFill:
         """Stop filling; the voice ends at whatever was already converted."""
         self._cancelled.set()
 
+    def discard(self) -> None:
+        """Release an unpublished fill on its preparation thread.
+
+        No background reader has been launched for abandoned preparations.
+        """
+        self.cancel()
+        self._finish()
+
     def join(self, timeout: float | None = None) -> None:
         if self._thread is not None:
             self._thread.join(timeout)
@@ -143,8 +157,8 @@ class StreamFill:
             while not self._cancelled.is_set():
                 if self._step(BLOCK_FRAMES):
                     break
-        except Exception:  # noqa: BLE001 - a damaged tail ends the voice early
-            pass
+        except Exception as exc:  # a damaged tail ends the voice and reports why
+            self.voice.error = str(exc) or exc.__class__.__name__
         finally:
             self._finish()
 
@@ -160,12 +174,19 @@ class StreamFill:
 
     def _write(self, pcm) -> None:
         voice = self.voice
-        start = voice.filled
-        count = min(int(pcm.shape[0]), voice.pcm.shape[0] - start)
-        if count > 0:
-            voice.pcm[start:start + count] = pcm[:count]
-            # Publish only after the frames are written.
-            voice.filled = start + count
+        offset = 0
+        # Single producer/single consumer: filled and cursor are published only
+        # after their respective copy. Cancellation wakes a full-ring producer.
+        while offset < len(pcm) and not self._cancelled.is_set():
+            free = len(voice.pcm) - (voice.filled - voice.cursor)
+            if free <= 0:
+                self._cancelled.wait(0.005)
+                continue
+            start = voice.filled % len(voice.pcm)
+            count = min(free, len(pcm) - offset, len(voice.pcm) - start)
+            voice.pcm[start:start + count] = pcm[offset:offset + count]
+            voice.filled += count
+            offset += count
 
     def _finish(self) -> None:
         if not self._file.closed:

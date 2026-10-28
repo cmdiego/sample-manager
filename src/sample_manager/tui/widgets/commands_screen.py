@@ -22,7 +22,7 @@ class CommandsScreen(ModalScreen[str | None]):
     DEFAULT_CSS = """
     CommandsScreen { align: right bottom; background: transparent; }
     #commands-dialog {
-        width: 56; max-width: 80%; height: auto; max-height: 75%;
+        width: 56; max-width: 80%; height: auto; max-height: 12;
         margin: 0 1 2 0;
         border: round $accent; background: $surface; padding: 0 1;
     }
@@ -47,8 +47,13 @@ class CommandsScreen(ModalScreen[str | None]):
 
     def on_mount(self) -> None:
         """Show all groups immediately, including before the first library exists."""
+        self.query_one("#commands-dialog").styles.max_height = min(12, max(4, int(self.app.size.height * 0.75)))
         self._render_entries()
         self.query_one(OptionList).focus()
+
+    def on_resize(self) -> None:
+        """Respect both the compact popup cap and very short terminals."""
+        self.query_one("#commands-dialog").styles.max_height = min(12, max(4, int(self.app.size.height * 0.75)))
 
     def _render_entries(self) -> None:
         """Show only continuations of the current sequence, one key per row."""

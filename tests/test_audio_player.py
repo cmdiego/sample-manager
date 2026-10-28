@@ -254,3 +254,33 @@ def test_seek_clamps_past_end_to_last_frame():
         assert output.starts[-1][1] == 99  # last valid frame index
     finally:
         player.close()
+
+
+def test_pause_before_output_registration_invalidates_guarded_start():
+    """Cancellation in the player/output handoff gap must reach the adapter."""
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    class GuardedOutput(FakeOutput):
+        """Expose a barrier before the adapter registers a pending start."""
+
+        def start_if_current(self, audio, start_frame, on_complete, is_current):
+            """Publish only requests still valid after the handoff barrier."""
+            entered.set()
+            assert release.wait(5)
+            if is_current():
+                self.start(audio, start_frame, on_complete)
+            finished.set()
+
+    output = GuardedOutput()
+    player = AudioPlayer(decoder=lambda path: _audio(), output=output)
+    try:
+        player.play(Path("pending.wav"))
+        assert entered.wait(5)
+        player.pause()
+        release.set()
+        assert finished.wait(5)
+        assert output.starts == []
+        assert player.snapshot().status is PlaybackStatus.PAUSED
+    finally:
+        release.set()
+        player.close()

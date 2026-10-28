@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..db import Db
+from ..normalize import norm_rel_path
 from ..scanner import ScanResult
 from ..services.library_browser import LibraryBrowserService
 from ..services.stage_workspace import StageWorkspace
@@ -51,6 +52,38 @@ class TuiDataSource:
             )
             for item in self._service.search_samples(root, query)
         )
+
+    def browse_facets(self, root_path: Path, directory: Path | None = None) -> tuple[list[dict], dict[int, dict]]:
+        """Fetch root-scoped tag choices and summaries using repository queries."""
+        from ..repos.browser_facets_repo import BrowserFacetsRepo
+        root = next((r for r in self._service.library_roots() if r.path == root_path), None)
+        if root is None:
+            return [], {}
+        repo = BrowserFacetsRepo(self._db)
+        relative = (directory or root_path).relative_to(root_path)
+        prefix = norm_rel_path(relative) + "/" if relative.parts else ""
+        return repo.tags(root.id, prefix), repo.summaries(root.id, prefix)
+
+    def tagged_samples(self, root_path: Path, tag: str, directory: Path | None = None) -> tuple[NavItem, ...]:
+        """Apply the existing alias/descendant search semantics, scoped to root."""
+        from ..search import SearchEngine
+        search = SearchEngine(self._db)
+        indexed = self.get_indexed_files(root_path)
+        selected = self.get_selection_ids()
+        results = []
+        page = 1
+        while True:
+            batch = search.search(tags=[tag], page=page, page_size=1000)
+            for row in batch.items:
+                if (indexed.get(norm_rel_path(row["rel_path"])) == row["id"] and
+                        (root_path / row["rel_path"]).is_relative_to(directory or root_path)):
+                    results.append(NavItem(row["filename"], root_path / row["rel_path"],
+                                           False, row["id"], row["id"] in selected,
+                                           context=str(Path(row["rel_path"]).parent)))
+            if page >= batch.total_pages:
+                break
+            page += 1
+        return tuple(results)
 
     def scan_directory(self, root_path: Path) -> ScanResult:
         """Reconcile a root using the service's separate worker DB connection."""

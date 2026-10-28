@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "sample-manager-engine"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Optional Rust audition engine for sample-manager"
+readme = "README.md"
+
+[tool.maturin]
+manifest-path = "sm-engine-py/Cargo.toml"
+python-source = "python"
+module-name = "sample_manager_engine._engine"

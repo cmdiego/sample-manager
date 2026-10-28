@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.widget import Widget
+from textual.containers import Horizontal
+from .browse_columns import BrowseColumns
 
 from ..nav_state import NavState
 from .filters_panel import FiltersPanel
@@ -22,7 +24,9 @@ class BrowserZone(Widget):
 
     def compose(self) -> ComposeResult:
         yield FiltersPanel(id="filters-panel")
-        yield SampleListWidget(self._initial_state, id="sample-list")
+        with Horizontal(id="browse-content"):
+            yield BrowseColumns(id="browse-columns")
+            yield SampleListWidget(self._initial_state, id="sample-list")
 
     @property
     def filters_panel(self) -> FiltersPanel:

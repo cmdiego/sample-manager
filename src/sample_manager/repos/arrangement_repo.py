@@ -12,14 +12,16 @@ class ArrangementRepo:
     def __init__(self, db: Db) -> None:
         self._db = db
 
-    def create(self, name: str, profile_name: str) -> dict:
+    def create(self, name: str, profile_name: str, *, commit: bool = True) -> dict:
         """Create a new arrangement."""
         name_norm = norm_text(name)
         self._db.execute(
             "INSERT INTO arrangement (name, name_norm, profile_name) VALUES (?, ?, ?)",
             (name, name_norm, profile_name),
         )
-        self._db.conn.commit()
+        # A workflow may own an outer transaction covering initial membership.
+        if commit:
+            self._db.conn.commit()
 
         row = self._db.fetchone(
             "SELECT id, name, name_norm, profile_name, created_at, updated_at "

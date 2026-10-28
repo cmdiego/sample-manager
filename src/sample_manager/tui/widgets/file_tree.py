@@ -95,5 +95,11 @@ def _format_item(item: NavItem, focused: bool = False) -> str:
     # Search may show identical filenames from several packs; include the
     # relative parent while keeping the actual filename and path unchanged.
     context = f" [dim]— {escape(item.context)}[/dim]" if item.context else ""
-    text = f"{cursor} {check}{name}{context}{indexed_tag}"
+    summary = ""
+    if item.duration_seconds is not None:
+        summary = f" [dim]{item.duration_seconds:.2f}s"
+        if item.loudness_lufs is not None:
+            summary += f"  {item.loudness_lufs:.1f} LUFS"
+        summary += "[/dim]"
+    text = f"{cursor} {check}{name}{context}{summary}{indexed_tag}"
     return f"[bold]{text}[/bold]" if focused else text

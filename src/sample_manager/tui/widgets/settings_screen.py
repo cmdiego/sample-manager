@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Awaitable, Callable
+import inspect
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, Select, Static, Switch
+from textual.widgets import Button, Input, Label, Select, Static, Switch
 
 from ...audio import list_output_devices
 from ..settings import TuiPreferences
@@ -38,7 +39,7 @@ class SettingsScreen(ModalScreen):
         self,
         preferences: TuiPreferences,
         *,
-        on_save: Callable[[TuiPreferences], None],
+        on_save: Callable[[TuiPreferences], None | Awaitable[None]],
         config_path: Path,
         database_path: str,
         library_path: str,
@@ -46,6 +47,7 @@ class SettingsScreen(ModalScreen):
     ) -> None:
         super().__init__()
         self._preferences = preferences
+        self._saving = False
         self._on_save = on_save
         self._config_path = config_path
         self._database_path = database_path
@@ -83,6 +85,20 @@ class SettingsScreen(ModalScreen):
                 yield Label("Auto-audition while browsing results")
                 yield Switch(self._preferences.auto_audition, id="tui-auto-audition")
                 yield Static("Space still plays or pauses when auto-audition is off.")
+                yield Label("Theme")
+                yield Select([("Dark", "dark"), ("Light", "light")], value=self._preferences.theme,
+                             allow_blank=False, id="tui-theme")
+                yield Label("Audio engine (Python is the validated default)")
+                yield Select([(v.capitalize(), v) for v in ("python", "auto", "native")],
+                             value=self._preferences.engine, allow_blank=False, id="tui-engine")
+                yield Label("Buffer frames (smaller buffers need more CPU headroom)")
+                yield Select([(str(v), v) for v in (128, 256, 512, 1024, 2048)],
+                             value=self._preferences.buffer_frames, allow_blank=False, id="tui-buffer")
+                yield Label("Prefetch neighbours per side (0–10)")
+                yield Input(str(self._preferences.prefetch_depth), type="integer", id="tui-prefetch")
+                yield Label("Decoded cache MiB (16–2048)")
+                yield Input(str(self._preferences.cache_mb), type="integer", id="tui-cache")
+                yield Static("Audio changes stop playback; theme applies immediately. Level matching is not yet supported.")
                 yield Label("Current library")
                 yield Static(self._library_path, markup=False)
                 yield Label("Configuration")
@@ -101,23 +117,36 @@ class SettingsScreen(ModalScreen):
 
     def action_cancel(self) -> None:
         """Discard unsaved values and return to the previous TUI view."""
-        self.dismiss()
+        if not self._saving:
+            self.dismiss()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Persist on Save; retain the modal and show any save error in place."""
         event.stop()
+        if self._saving:
+            return
         if event.button.id == "tui-settings-cancel":
             self.dismiss()
             return
         if event.button.id != "tui-settings-save":
             return
-        preferences = TuiPreferences(
-            self.query_one("#tui-auto-audition", Switch).value,
-            str(self.query_one("#tui-audio-output", Select).value),
-        )
+        self._saving = True
         try:
-            self._on_save(preferences)
+            preferences = TuiPreferences(
+                self.query_one("#tui-auto-audition", Switch).value,
+                str(self.query_one("#tui-audio-output", Select).value),
+                theme=str(self.query_one("#tui-theme", Select).value),
+                engine=str(self.query_one("#tui-engine", Select).value),
+                buffer_frames=int(self.query_one("#tui-buffer", Select).value),
+                prefetch_depth=int(self.query_one("#tui-prefetch", Input).value),
+                cache_mb=int(self.query_one("#tui-cache", Input).value),
+            )
+            result = self._on_save(preferences)
+            if inspect.isawaitable(result):
+                await result
         except Exception as exc:  # noqa: BLE001 - preserve edits after write/backend failure
             self.query_one("#tui-settings-error", Static).update(f"Could not save settings: {exc}")
             return
+        finally:
+            self._saving = False
         self.dismiss()

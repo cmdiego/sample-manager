@@ -80,6 +80,7 @@ class AudioPlayer:
         self._path: Path | None = None
         self._audio: DecodedAudio | None = None
         self._audio_path: Path | None = None
+        self._audio_identity = None
         self._position_frames = 0
         self._error: str | None = None
         self._worker = threading.Thread(
@@ -158,6 +159,15 @@ class AudioPlayer:
             sample_rate = self._audio.sample_rate if self._audio else 0
             duration = self._audio.duration_seconds if self._audio else None
             error = self._error
+            generation = self._generation
+        output_error = getattr(self._output, "playback_error", None)
+        if status is PlaybackStatus.PLAYING and output_error is not None:
+            failure = output_error()
+            if failure:
+                with self._lock:
+                    if self._is_current(generation):
+                        self._status = status = PlaybackStatus.ERROR
+                        self._error = error = failure
         if status is PlaybackStatus.PLAYING:
             position_frames = self._output.position_frames()
         return PlaybackSnapshot(
@@ -216,10 +226,15 @@ class AudioPlayer:
 
     def _execute_play(self, generation: int, path: Path) -> None:
         try:
+            try:
+                stat = path.stat()
+                identity = (stat.st_size, stat.st_mtime_ns)
+            except OSError:
+                identity = None  # Fake/test decoders may own non-filesystem paths.
             with self._lock:
                 if not self._is_current(generation):
                     return
-                audio = self._audio if self._audio_path == path else None
+                audio = self._audio if self._audio_path == path and self._audio_identity == identity else None
                 start_frame = self._position_frames
 
             if audio is None:
@@ -231,14 +246,20 @@ class AudioPlayer:
                     return
                 self._audio = audio
                 self._audio_path = path
+                self._audio_identity = identity
                 self._position_frames = start_frame
                 self._status = PlaybackStatus.PLAYING
 
-            self._output.start(
-                audio,
-                start_frame,
-                lambda: self._on_complete(generation),
-            )
+            # Persistent output checks this generation at registration/publication,
+            # closing the gap between releasing the player lock and starting output.
+            guarded_start = getattr(self._output, "start_if_current", None)
+            if guarded_start is not None:
+                guarded_start(
+                    audio, start_frame, lambda: self._on_complete(generation),
+                    lambda: self._generation_is_current(generation),
+                )
+            else:
+                self._output.start(audio, start_frame, lambda: self._on_complete(generation))
         except Exception as exc:  # noqa: BLE001 - normalize adapter failures
             with self._lock:
                 if self._is_current(generation):
@@ -246,11 +267,20 @@ class AudioPlayer:
                     self._error = str(exc) or exc.__class__.__name__
 
     def _on_complete(self, generation: int) -> None:
+        """Read output health outside the player lock to avoid lock inversion."""
+        output_error = getattr(self._output, "playback_error", None)
+        failure = output_error() if output_error is not None else None
         with self._lock:
             if not self._is_current(generation):
                 return
             self._position_frames = 0
-            self._status = PlaybackStatus.IDLE
+            self._status = PlaybackStatus.ERROR if failure else PlaybackStatus.IDLE
+            self._error = failure
+
+    def _generation_is_current(self, generation: int) -> bool:
+        """Read cancellation under the player lock for guarded output starts."""
+        with self._lock:
+            return self._is_current(generation)
 
     def _is_current(self, generation: int) -> bool:
         return not self._closed and generation == self._generation

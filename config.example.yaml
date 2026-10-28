@@ -15,3 +15,13 @@ defaults:
   on_violation: "autofix"      # autofix | fail
   preview_format: "table"      # table | json
   confirmations: true
+
+# Optional v2 audio and terminal appearance (older configs remain valid).
+audio:
+  engine: python
+  buffer_frames: 1024
+  prefetch_depth: 3
+  cache_mb: 256
+tui:
+  auto_audition: true
+  theme: dark

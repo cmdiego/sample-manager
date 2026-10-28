@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QLabel
@@ -228,5 +230,23 @@ def test_player_factory_routes_to_selected_device(monkeypatch):
     try:
         assert warning is None
         assert player._output._device == 9
+    finally:
+        player.close()
+
+
+@pytest.mark.parametrize("engine", ["native", "auto"])
+def test_gui_defers_native_engine_until_tui_acceptance(monkeypatch, engine):
+    """TUI native opt-in must not promote Qt ahead of design milestone 6."""
+    from unittest.mock import Mock
+    from sample_manager.tui.settings import TuiPreferences
+    factory = Mock(side_effect=AssertionError("Qt must keep its Python player"))
+    monkeypatch.setattr("sample_manager.audio.backends.is_available", lambda name: True)
+    monkeypatch.setattr("sample_manager.tui.settings.load_tui_preferences", lambda: TuiPreferences(engine=engine))
+    monkeypatch.setattr("sample_manager.audio.factory.build_player", factory)
+    player, warning = _build_player(AudioOutputSelection(AudioOutputMode.SPECIFIC_DEVICE, 9))
+    try:
+        assert warning is None
+        assert player._output._device == 9
+        factory.assert_not_called()
     finally:
         player.close()

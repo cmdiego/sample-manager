@@ -94,6 +94,8 @@ def _build_player(selection: AudioOutputSelection | AudioOutputMode):
         if selection.mode is AudioOutputMode.SPECIFIC_DEVICE
         else None
     )
+    # The accepted v2 rollout keeps Qt on its existing Python player until
+    # TUI milestone 5 exits; TUI audio.engine settings must not change Qt yet.
     return AudioPlayer(output=SoundDeviceOutput(device=device)), None
 
 

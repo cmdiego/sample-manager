@@ -22,6 +22,8 @@ class NavItem:
     sample_id: int | None  # None = file not indexed in DB
     is_selected: bool
     context: str = ""  # Relative parent shown for library-wide search results.
+    duration_seconds: float | None = None
+    loudness_lufs: float | None = None
 
 
 @dataclass(frozen=True)

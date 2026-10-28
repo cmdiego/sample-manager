@@ -42,10 +42,12 @@ def test_workspace_geometry_and_live_resize(tmp_path, size):
                 assert browser.region.right == stage.region.x
                 assert stage.region.right == width
                 assert shortcuts.region.bottom == height
+                assert stage.region.bottom == app.query_one("#transport-bar").region.y
                 assert stage.region.bottom <= shortcuts.region.y
-                assert app.query_one("#sample-list").size.height >= 10
+                assert app.query_one("#sample-list").size.height >= 9
                 assert not app.query("#session-summary")
                 assert not app.query("Footer")
+                assert app.query_one("#browse-columns").display == (width >= 100)
 
     asyncio.run(exercise())
 

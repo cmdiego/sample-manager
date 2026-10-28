@@ -192,8 +192,12 @@ class WaveformWidget(Widget):
         self._message = "loading waveform..." if path else ""
         self._progress = 0.0
         self._nav_cursor: float | None = None
+        self._render_key = None
+        self._render_lines: list[str] = []
 
     def set_loading(self, path: Path) -> None:
+        """Invalidate rendered geometry when the source identity changes."""
+        self._render_key = None
         self.path = path
         self._data = None
         self._message = "loading waveform..."
@@ -202,6 +206,8 @@ class WaveformWidget(Widget):
         self.refresh()
 
     def set_data(self, data: WaveformData) -> None:
+        """Reset the envelope cache even if Python recycles an old object ID."""
+        self._render_key = None
         self.path = data.path
         self._data = data
         self._message = ""
@@ -210,6 +216,8 @@ class WaveformWidget(Widget):
         self.refresh()
 
     def set_error(self, path: Path, message: str) -> None:
+        """Clear cached data and show the error for this target only."""
+        self._render_key = None
         self.path = path
         self._data = None
         self._message = f"waveform unavailable: {message}"
@@ -240,9 +248,29 @@ class WaveformWidget(Widget):
         width = max(0, self.size.width)
         height = max(1, self.size.height)
         if self._data is not None:
-            return render_braille_waveform(
-                # The renderer consumes two source columns per terminal cell.
-                # Pass the source width so the waveform fills its actual pane.
-                self._data.bins, width * 2, height, self._progress, self._nav_cursor
-            )
+            # Geometry/envelope work is cached; each tick overlays only cursor
+            # columns and styles. Theme colour is inherited from the widget.
+            key = (id(self._data), width, height, self.app.theme)
+            if key != self._render_key:
+                self._render_lines = render_braille_waveform(
+                    self._data.bins, width * 2, height,
+                ).plain.splitlines()
+                self._render_key = key
+            play = min(width - 1, int(self._progress * width)) if self._progress > 0 else -1
+            nav = min(width - 1, int(self._nav_cursor * width)) if self._nav_cursor is not None else -1
+            output = Text()
+            for row, original in enumerate(self._render_lines):
+                line = original
+                for column, char in ((play, "│"), (nav, "▌")):
+                    if column >= 0:
+                        line = line[:column] + char + line[column + 1:]
+                start = len(output)
+                output.append(line)
+                if play >= 0:
+                    output.stylize("bold", start, start + play + 1)
+                if nav >= 0:
+                    output.stylize("bold reverse", start + nav, start + nav + 1)
+                if row < len(self._render_lines) - 1:
+                    output.append("\n")
+            return output
         return Text(self._message, style="dim", justify="center", overflow="ellipsis")

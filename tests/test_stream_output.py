@@ -154,3 +154,119 @@ def test_resuming_same_audio_reuses_conversion(streams, monkeypatch):
         assert len(calls) == 2
     finally:
         output.close()
+
+
+@pytest.mark.parametrize("preparation", ["pcm", "stream"])
+@pytest.mark.parametrize("action", ["pause", "close", "replace", "guard"])
+def test_pending_preparation_cannot_outlive_lifecycle(
+    streams, monkeypatch, tmp_path, preparation, action,
+):
+    """Block preparation so cancellation wins deterministically, without sleeps."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from sample_manager.audio import stream_output
+    from sample_manager.audio.streaming import StreamFill, StreamingSource
+
+    entered, release = threading.Event(), threading.Event()
+    output = StreamingSoundDeviceOutput()
+    completed, fills = [], []
+    current = True
+    if preparation == "pcm":
+        audio = _audio(np.full((4096, 1), 0.5))
+        real = stream_output.conform
+
+        def blocked_conform(*args):
+            """Block only the older voice, allowing replacement to complete."""
+            if args[0] is audio.samples:
+                entered.set()
+                assert release.wait(5)
+            return real(*args)
+
+        monkeypatch.setattr(stream_output, "conform", blocked_conform)
+    else:
+        sf = pytest.importorskip("soundfile")
+        path = tmp_path / "pending.wav"
+        sf.write(path, np.full((8192, 1), 0.5), 48000)
+        audio = StreamingSource(path, 48000, 8192, 1)
+        real = StreamFill.fill_first_block
+
+        def blocked_first_block(fill):
+            """Retain the abandoned fill to verify its file is closed."""
+            fills.append(fill)
+            entered.set()
+            assert release.wait(5)
+            return real(fill)
+
+        monkeypatch.setattr(StreamFill, "fill_first_block", blocked_first_block)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(
+            output.start_if_current, audio, 0, lambda: completed.append("old"),
+            lambda: current,
+        )
+        try:
+            assert entered.wait(5)
+            if action == "pause":
+                output.pause()
+            elif action == "close":
+                output.close()
+            elif action == "guard":
+                current = False
+            else:
+                output.start(_audio(np.full((4096, 1), 0.25)), 0, lambda: None)
+            release.set()
+            pending.result(timeout=5)
+            rendered = streams[0].pull(512)
+            assert np.allclose(rendered, 0.25 if action == "replace" else 0.0)
+            output.dispatch_pending()
+            assert completed == []
+            for fill in fills:
+                assert fill._file.closed
+                assert fill._thread is None
+        finally:
+            release.set()
+            output.close()
+
+
+def test_closed_output_never_reopens(streams):
+    """Shutdown is terminal even if a delayed worker calls start afterward."""
+    output = StreamingSoundDeviceOutput()
+    output.close()
+    output.start(_audio([[0.5]]), 0, lambda: None)
+    output.close()
+    assert streams == []
+
+
+def test_guard_rejects_before_stream_registration(streams):
+    """Player cancellation before output entry must not open a device."""
+    output = StreamingSoundDeviceOutput()
+    try:
+        output.start_if_current(_audio([[0.5]]), 0, lambda: None, lambda: False)
+        assert streams == []
+    finally:
+        output.close()
+
+
+def test_first_block_failure_closes_unpublished_fill(streams, monkeypatch, tmp_path):
+    """A failed synchronous first read must release its open native file."""
+    from sample_manager.audio.streaming import StreamFill, StreamingSource
+
+    sf = pytest.importorskip("soundfile")
+    path = tmp_path / "broken.wav"
+    sf.write(path, np.zeros((8192, 1)), 48000)
+    fills = []
+
+    def fail_first_block(fill):
+        """Simulate a decoder failure after the file was opened."""
+        fills.append(fill)
+        raise RuntimeError("first block failed")
+
+    monkeypatch.setattr(StreamFill, "fill_first_block", fail_first_block)
+    output = StreamingSoundDeviceOutput()
+    try:
+        with pytest.raises(RuntimeError, match="first block failed"):
+            output.start(StreamingSource(path, 48000, 8192, 1), 0, lambda: None)
+        assert fills[0]._file.closed
+        assert np.all(streams[0].pull(512) == 0)
+    finally:
+        output.close()

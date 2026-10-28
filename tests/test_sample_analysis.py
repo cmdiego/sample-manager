@@ -374,3 +374,70 @@ def test_cli_analyze_rejects_unknown_roots(cli_runner, cli_config, tmp_path):
     result = cli_runner.invoke(app, ["analyze", str(tmp_path)])
     assert result.exit_code == 2
     assert "not an indexed library root" in result.output
+
+
+def test_replacement_during_decode_never_gets_a_valid_analysis(db, library, indexed):
+    """Old PCM must not be labelled with the replacement's current stat."""
+    kick = library / "drums/kick.wav"
+
+    def replacing_decoder(path):
+        """Return old data after replacing the on-disk file."""
+        audio = decode(path)
+        if path == kick:
+            sf.write(path, _sine(110, 1.0), 48000)
+        return audio
+
+    result = backfill_analysis(db, library_root_id=indexed, decoder=replacing_decoder)
+    assert result.failed == 1
+    assert db.fetchval("SELECT COUNT(*) FROM sample_analysis") == 1
+
+
+def test_cancel_during_decode_does_not_commit(db, library, indexed):
+    """Cooperative cancellation is rechecked after expensive decode/analysis."""
+    cancel = threading.Event()
+
+    def cancelled_decoder(path):
+        """Cancel while an executor job is inside decoding."""
+        audio = decode(path)
+        cancel.set()
+        return audio
+
+    backfill_analysis(db, library_root_id=indexed, decoder=cancelled_decoder, cancel=cancel)
+    assert db.fetchval("SELECT COUNT(*) FROM sample_analysis") == 0
+
+
+def test_deferred_writer_carries_decode_identity(file_db, library):
+    """Replacing a file while its old PCM waits in the writer queue stays invalid."""
+    release = threading.Event()
+    service = StoredWaveformService(decoder=decode, db_path=file_db)
+    kick = library / "drums/kick.wav"
+    service._writer.submit(lambda: release.wait(5))
+    try:
+        service.load(kick)
+        sf.write(kick, _sine(110, 1.0, amplitude=0.2), 48000)
+        release.set()
+        service.flush(5)
+        from sample_manager.db import Db
+        with Db(file_db) as db:
+            sid = resolve_sample_id(db, kick)
+            stat = kick.stat()
+            assert SampleAnalysisRepo(db).get_valid(sid, size_bytes=stat.st_size,
+                mtime_ns=stat.st_mtime_ns, analysis_version=ANALYSIS_VERSION) is None
+    finally:
+        release.set()
+        service.close()
+
+
+def test_pending_writer_pcm_is_bounded(file_db, library):
+    """Fast focus changes cannot retain an unbounded queue of whole decoded files."""
+    release = threading.Event()
+    service = StoredWaveformService(decoder=decode, db_path=file_db)
+    service._writer.submit(lambda: release.wait(5))
+    try:
+        for path in library.rglob("*.wav"):
+            service.load(path)
+        assert len(service._pending) <= 2
+    finally:
+        release.set()
+        service.flush(5)
+        service.close()

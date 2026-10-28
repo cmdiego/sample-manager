@@ -1,0 +1,100 @@
+name: Native engine
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust contracts and callback guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - name: Pinned toolchain, formatting, lint and core contracts
+        working-directory: engine
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component clippy --component rustfmt
+          cargo fmt --all --check
+          cargo clippy --workspace --locked -- -D warnings
+          cargo test -p sm-engine --locked
+
+  wheels:
+    name: Wheel (${{ matrix.target }})
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.10"
+      - name: Linux runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config libportaudio2 libegl1 libgl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0
+      - uses: PyO3/maturin-action@86b9d133d34bc1b40018696f782949dac11bd380
+        with:
+          working-directory: engine
+          target: ${{ matrix.target }}
+          rust-toolchain: 1.90.0
+          maturin-version: v1.15.0
+          manylinux: '2_28'
+          before-script-linux: yum install -y alsa-lib-devel pkgconfig
+          args: --release --locked --out dist --manifest-path sm-engine-py/Cargo.toml
+      - name: Native wheel and full Python 3.10 regressions
+        shell: bash
+        run: |
+          python -m pip install engine/dist/*.whl
+          python -m pip install ".[dev,audio]"
+          python -c "import sample_manager_engine; e = sample_manager_engine.Engine(backend='null'); e.close()"
+          python -m pytest --ignore=tests/gui -q
+          python -m pytest tests/gui -q
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.14"
+      - name: Same abi3 wheel on Python 3.14
+        shell: bash
+        run: |
+          python -m pip install engine/dist/*.whl
+          python -m pip install ".[dev,audio]"
+          python -c "import sample_manager_engine; e = sample_manager_engine.Engine(backend='null'); e.close()"
+          python -m pytest tests/test_engine_contract.py tests/test_v2_workflow.py -q
+      - name: Retain wheels for review (no package publication)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-${{ matrix.target }}
+          path: engine/dist/*.whl
+          if-no-files-found: error

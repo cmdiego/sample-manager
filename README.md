@@ -261,6 +261,69 @@ sample; press **Enter**, **Down**, or click a result to audition it.
 > current headless CI environment and will be added once a display-backed
 > capture is available.
 
+## v2 workspace and optional native audio
+
+Browse, Search and Stage views are available from the top bar, **Alt+1/2/3**,
+leader → v, or the command palette. Switching views preserves the search query
+and shared Stage folders. **Tab** still switches Browser/Stage and **h/l** still
+navigate directories. Wide terminals show folder/tag columns; use **Alt+Left**
+to enter them, **Alt+Right/Left** to change column, **Enter** to apply and **Esc**
+to return. Columns collapse below 100 characters. Tag choices include descendants.
+Stored analysis supplies duration/LUFS summaries when available.
+
+The bottom transport retains the playing sample independently of browsing focus.
+It shows a full-width waveform, time and supported engine health fields. The
+compact Preview keeps focused metadata and existing waveform seeking controls.
+Transport updates during loading/playback and stops polling while idle.
+
+**Stage view** adds Tag all, Arrange and confirmed Clear actions.
+**Alt+4**, the Arrangements button or leader → s → r opens saved arrangements.
+Choose an arrangement profile and name to save Stage with its virtual folders,
+merge Stage into an existing arrangement, or remove a saved sample reference.
+Choose an export profile and **Preview** to inspect destination paths. **Copy
+export…** and history-based **Revert selected…** require confirmation. The TUI
+copies source files and preserves them; existing CLI export modes remain available.
+Configure profiles in the YAML files named by `profiles_dir` if the lists are empty.
+
+**F2 Settings** now includes dark/light theme, engine, buffer frames, prefetch
+depth and decoded cache size. Audio changes stop playback; visual changes apply
+immediately. Existing configs remain readable. Shared `audio` keys take precedence
+over legacy `tui` audio keys; saving retains unrelated configuration values:
+
+```yaml
+audio:
+  engine: python           # python (default), auto, native
+  audio_output: system_default
+  buffer_frames: 1024      # 128, 256, 512, 1024 or 2048
+  prefetch_depth: 3        # 0–10 neighbours per side
+  cache_mb: 256            # 16–2048 MiB
+tui:
+  auto_audition: true
+  theme: dark              # dark or light
+  theme_tokens:            # optional colour overrides
+    accent: "#638fba"
+```
+
+The optional Rust engine is built separately; see [engine/README.md](engine/README.md).
+Install a local/CI `sample-manager-engine` wheel before selecting native. Once
+published, the same package can be installed with `pip install "sample-manager[native]"`.
+`auto` reports native failures and falls back to Python; explicit `native` reports
+an actionable error. Qt keeps its existing Python player and output-device settings;
+native Qt adoption remains deferred until the TUI v2 acceptance milestone.
+
+Diagnostics use disposable engine instances, independently of a running frontend:
+
+```sh
+sampleman engine stats --engine python --backend null
+sampleman engine bench /path/to/fixtures --engine native --backend null
+```
+
+`null` never opens an output device. Use `--backend device` for hardware checks.
+Benchmarks report input-to-first-non-silent-buffer timing, not acoustic latency;
+a first pass is not guaranteed cold disk. Native remains opt-in pending platform
+CI and real-device latency/listening acceptance. Level matching and oversampled
+true-peak analysis remain future work.
+
 ## Concepts
 
 ### Library Root

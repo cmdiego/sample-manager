@@ -34,6 +34,12 @@ class ExportRunRepo:
         assert row is not None
         return dict(row)
 
+    def list_recent(self, limit: int = 100) -> list[dict]:
+        """List recorded runs for explicit history-based revert selection."""
+        return [dict(row) for row in self._db.fetchall(
+            "SELECT * FROM export_run ORDER BY id DESC LIMIT ?", (limit,),
+        )]
+
     def get_by_id(self, export_id: int) -> dict | None:
         row = self._db.fetchone("SELECT * FROM export_run WHERE id = ?", (export_id,))
         return dict(row) if row else None

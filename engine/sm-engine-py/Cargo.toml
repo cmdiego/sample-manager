@@ -1,0 +1,18 @@
+[package]
+name = "sm-engine-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Stable ABI Python bindings for the sample-manager audio engine"
+repository = "https://github.com/cmdiego/sample-manager"
+
+[lib]
+name = "_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+sm-engine = { path = "../sm-engine" }
+pyo3 = { version = "=0.27.1", features = ["extension-module", "abi3-py310"] }
+
+[build-dependencies]
+pyo3-build-config = "=0.27.1"

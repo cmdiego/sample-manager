@@ -38,6 +38,8 @@ class Voice:
     first_render_at: float | None = field(default=None)
     filled: int | None = None  # frames of pcm written; None means all of pcm
     complete: bool = True
+    circular: bool = False  # streaming PCM uses absolute cursors over a fixed ring
+    error: str | None = None  # producer failures become output/player errors
     starved: int = 0  # renders that ran out of filled frames before the end
 
     @property
@@ -88,16 +90,24 @@ class Mixer:
             if count < frames and not complete and not voice.stopping:
                 voice.starved += 1
             if count > 0:
-                chunk = voice.pcm[voice.cursor:voice.cursor + count]
-                if voice.gain == voice.target:
-                    if voice.gain == 1.0:
-                        out[:count] += chunk
+                # Read at most two spans from the fixed-size streaming ring.
+                # Publish cursor only after both spans have been consumed so the
+                # producer cannot overwrite data still in this callback.
+                offset = voice.cursor % len(voice.pcm) if voice.circular else voice.cursor
+                first = min(count, len(voice.pcm) - offset)
+                ramp = self._ramp(np, voice, count) if voice.gain != voice.target else None
+                for dest, src, length in ((0, offset, first), (first, 0, count - first)):
+                    if length <= 0:
+                        continue
+                    chunk = voice.pcm[src:src + length]
+                    if ramp is not None:
+                        out[dest:dest + length] += chunk * ramp[dest:dest + length, None]
+                    elif voice.gain == 1.0:
+                        out[dest:dest + length] += chunk
                     elif voice.gain != 0.0:
-                        out[:count] += chunk * voice.gain
-                else:
-                    ramp = self._ramp(np, voice, count)
-                    out[:count] += chunk * ramp[:, None]
-                if voice.first_render_at is None and not voice.stopping:
+                        out[dest:dest + length] += chunk * voice.gain
+                if voice.first_render_at is None and not voice.stopping and (np.any(voice.pcm[offset:offset + first] != 0) or
+                        (count > first and np.any(voice.pcm[:count - first] != 0))):
                     now = now if now is not None else time.perf_counter()
                     voice.first_render_at = now
                 voice.cursor += count

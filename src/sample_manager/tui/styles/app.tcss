@@ -17,7 +17,7 @@ Screen {
 TopDisplayWidget {
     border: round $panel-lighten-2;
     border-title-color: $text;
-    height: 7;
+    height: 5;
     padding: 0 1;
     overflow: hidden hidden;
 }
@@ -28,12 +28,12 @@ TopDisplayWidget .meta-row {
 }
 TopDisplayWidget .meta-label { color: $text-muted; }
 TopDisplayWidget .waveform-display {
-    height: 4;
+    height: 2;
     width: 1fr;
     color: $accent;
 }
-.compact TopDisplayWidget { height: 6; }
-.compact TopDisplayWidget .waveform-display { height: 3; }
+.compact TopDisplayWidget { height: 5; }
+.compact TopDisplayWidget .waveform-display { height: 1; }
 
 #main-grid {
     layout: grid;
@@ -144,3 +144,23 @@ TopDisplayWidget .embedded-panel {
     text-overflow: ellipsis;
     color: $text;
 }
+
+/* Compact terminals reserve a full-width transport without hiding list rows. */
+.compact FiltersPanel { margin-bottom: 0; }
+
+#browse-content { height: 1fr; }
+#browse-content SampleListWidget { width: 1fr; }
+
+#view-tabs { height: 1; background: $panel; }
+#view-tabs Button { height: 1; min-width: 10; border: none; padding: 0 1; }
+#stage-actions { display: none; height: 3; }
+.stage-view #stage-actions { display: block; }
+.stage-view #browser-zone, .search-view #selection-list { display: none; }
+.stage-view #main-grid, .search-view #main-grid { grid-size: 1 1; grid-columns: 1fr; }
+.search-view BrowseColumns { display: none; }
+
+/* Core tempo/key, genre and tag rows fit alongside the compact preview. */
+.embedded-panel .embedded-title { display: none; }
+
+/* App ancestor state must live in application CSS, not widget-scoped defaults. */
+.narrow BrowseColumns { display: none; }

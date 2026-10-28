@@ -140,7 +140,11 @@ class StageWorkspace:
         duplicate path components merge by normalized sibling name.
         """
         repo = ArrangementRepo(self._db)
-        with self._db.transaction():
+        # Join an arrangement-creation transaction when one already owns the
+        # write lock; standalone Stage merges still commit as one operation.
+        from contextlib import nullcontext
+        transaction = nullcontext() if self._db.conn.in_transaction else self._db.transaction()
+        with transaction:
             existing_ids = set(repo.list_sample_ids(arrangement_id))
             inserted = repo.add_samples(arrangement_id, sample_ids)
             targets = repo.list_folders(arrangement_id)

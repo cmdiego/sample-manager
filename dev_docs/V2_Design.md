@@ -11,6 +11,46 @@ v2 has two goals, in priority order:
 2. **A more modern TUI**, using musikcube's layout and interaction ideas while
    keeping the keyboard model that v1 users already know.
 
+
+## Integration status (2026-10-28)
+
+The foundation and subsequent implementation slices are integrated on the
+local feature branch. Python output lifecycle/analysis identity and cancellation are
+hardened, streaming uses fixed PCM rings, and the TUI adds themes, a persistent
+transport, collapsible folder/tag columns, views, Stage bulk actions, and saved
+arrangement/preview/confirmed copy-export/history-revert workflows. Existing
+Stage folders, inspectors, cursor memory, h/l, Tab and Ctrl-directional pane
+contracts remain. Column focus uses additive Alt+Left/Right controls to preserve
+those contracts. The focused Preview waveform remains available for seeking;
+the bottom transport independently represents the sounding sample.
+
+The Rust workspace and optional PyO3 wheel now exist; the pure core, headless
+adapter parity, normal callback allocation guard and local macOS ARM64 wheel are
+validated. Native is opt-in, with a five-target artifact-only wheel workflow.
+Qt retains its existing Python player until milestone 5 exits, as decided in
+§5.5 and §7. Native snapshots use safe atomics (eventually consistent) rather
+than a custom unsafe seqlock. The Python player owns resume/seek translation. CPAL device errors and ring starvation
+are distinguished from portable hardware xrun measurements.
+
+The historical measurements and targets below are not new release evidence.
+Real-device latency/listening, platform CI execution and slow-storage/device
+recovery acceptance remain open. Stored peaks are sample peaks; oversampled true
+peak and optional level matching remain future work. Python frame-zero auditions
+still preserve transients by bypassing fade-in; native starts use a 3 ms fade.
+Python scans/lazy analysis still decode files fully, independently of bounded
+playback streaming. See engine/README.md and task 035 for actual validation.
+
+The accepted design and Python foundation landed in main through PR #16; the
+Browser/Stage refresh landed through PR #18. The remaining native engine and TUI
+integration is on the feature branch, not yet release acceptance. Compatibility
+choices retain the focused Preview and plain h/l directory traversal; additive
+Alt column controls and a separate sounding-sample transport implement v2 without
+breaking the previously accepted keyboard behavior. Layout/behavior tests are
+not a declaration that milestone 5 has exited. Release-blocking export work
+remains: verify file ownership and retry safety on revert, restore moved sources,
+journal filesystem operations before mutation, and complete profile/collision
+validation. The detailed local remediation checklist is task 036.
+
 ---
 
 ## 1. What v1 does today (measured)
@@ -432,7 +472,7 @@ TCSS theming, mouse support and the test harness that already exist.
 | **2. Peaks and analysis at scan time** | `sample_analysis` table and migration, peak pyramid, LUFS, lazy backfill | Waveform shows in under 5 ms after focus |
 | ↳ *2 (done)* | Migration 6 `sample_analysis` (keyed by sample, valid while size + `mtime_ns` + `analysis_version` match); `audio/peaks.py` int8 4096/1024/256 pyramid (~10.5 KB/sample); `audio/loudness.py` BS.1770 integrated + max short-term LUFS via FFT overlap-add K-weighting (no SciPy; matches a per-sample IIR reference to 0.01 LU); `StoredWaveformService` in the TUI reads rows, else computes and stores in the background; post-scan backfill in the TUI; `sampleman analyze` and `scan --analyze` | Stored focus 1.6–1.8 ms for a one-shot or a 240 s stem vs 78 ms v1 decode (`tools/bench_waveform_focus.py`, Apple M4); backfill ≈ 4.5 ms/one-shot |
 | **3. Rust engine spike** | `engine/` workspace, cpal + symphonia (wav/aiff/flac/mp3) + rubato + rtrb, PyO3 binding, `NullBackend` tests, one-platform wheel | Meets §2 targets on one machine; clippy clean; callback allocation-free under `assert_no_alloc` |
-| **4. Rust engine productised** | `sample-manager-engine` abi3 wheel matrix, `[native]` extra, fallback logic, `play_pcm` bridge for non-native formats, `engine bench`, settings | Wheels for all 5 targets; automatic fallback verified; every v1 format still plays |
+| **4. Rust engine productised** | `sample-manager-engine` abi3 wheel matrix, `[native]` extra, fallback logic, `play_pcm` bridge for non-native formats, `engine bench`, settings | Wheels for all 5 platform/architecture combinations; automatic fallback verified; every v1 format still plays |
 | **5. TUI v2** | Neutral theme and tokens, transport bar, layout switcher, drill-down columns, inline detail | Snapshot tests for each layout; v1 keymap tests still pass; **TUI declared stable and usable** |
 | **6. Qt GUI catch-up** | Wire `NativeAudioPlayer` into `gui/controller.py`, adopt the transport-bar concept | Starts only after milestone 5 exits |
 | **7. Later** | Pitch/tempo-matched audition, MIDI trigger, more compressed formats, shared engine daemon (option D) | — |

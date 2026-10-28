@@ -27,12 +27,25 @@ def _ramp_wav(path: Path, seconds: float, rate: int = 8000, channels: int = 1) -
     return path
 
 
-def _drain(fill: StreamFill) -> Voice:
-    fill.fill_first_block()
+def _drain(fill: StreamFill):
+    """Consume while producing so bounded rings can wrap without deadlocking."""
+    import time
     fill.start_background()
-    fill.join(timeout=5.0)
-    assert fill.voice.complete
-    return fill.voice
+    mixer = Mixer(int(fill._source.sample_rate * fill.ratio), fill._channels, fade_seconds=0)
+    mixer.play(fill.voice, fade_in=False)
+    chunks = []
+    deadline = time.monotonic() + 5
+    while not fill.voice.complete or fill.voice.cursor < fill.voice.filled:
+        assert time.monotonic() < deadline
+        available = fill.voice.filled - fill.voice.cursor
+        if not available:
+            time.sleep(0.001)
+            continue
+        out = np.empty((min(512, available), fill._channels), dtype="float32")
+        mixer.render(out)
+        chunks.append(out)
+    fill.join(1)
+    return np.concatenate(chunks)
 
 
 # -- probing and source selection ------------------------------------------------
@@ -76,12 +89,12 @@ def test_fill_matches_full_decode_at_same_rate(tmp_path):
 
     fill.fill_first_block()
     assert 0 < fill.voice.filled < source.frames and not fill.voice.complete
-    voice = _drain(fill)
+    rendered = _drain(fill)
 
     expected, _rate = sf.read(path, dtype="float32", always_2d=True)
-    assert voice.filled == source.frames
-    np.testing.assert_array_equal(voice.pcm[:voice.filled, 0], expected[:, 0])
-    np.testing.assert_array_equal(voice.pcm[:voice.filled, 1], expected[:, 0])
+    assert fill.voice.filled == source.frames
+    np.testing.assert_array_equal(rendered[:, 0], expected[:, 0])
+    np.testing.assert_array_equal(rendered[:, 1], expected[:, 0])
 
 
 def test_fill_from_mid_file_starts_at_mapped_offset(tmp_path):
@@ -90,10 +103,11 @@ def test_fill_from_mid_file_starts_at_mapped_offset(tmp_path):
     fill = StreamFill(source, 20000, token=1, device_rate=8000, device_channels=1)
 
     assert fill.voice.cursor == 20000
-    voice = _drain(fill)
+    fill.fill_first_block()
+    rendered = _drain(fill)
 
     expected, _rate = sf.read(path, dtype="float32", always_2d=True)
-    np.testing.assert_array_equal(voice.pcm[20000:voice.filled, 0], expected[20000:, 0])
+    np.testing.assert_array_equal(rendered[:, 0], expected[20000:, 0])
 
 
 def test_fill_resamples_to_device_rate(tmp_path):
@@ -102,11 +116,12 @@ def test_fill_resamples_to_device_rate(tmp_path):
     source = probe_streaming_source(path, min_seconds=1.0)
     fill = StreamFill(source, 0, token=1, device_rate=12000, device_channels=1)
 
-    voice = _drain(fill)
+    fill.fill_first_block()
+    rendered = _drain(fill)
 
-    assert abs(voice.filled - 60000) <= 64
+    assert abs(fill.voice.filled - 60000) <= 64
     # The ramp keeps its shape after conversion (ignoring filter edges).
-    middle = voice.pcm[30000, 0]
+    middle = rendered[30000, 0]
     assert middle == pytest.approx(0.5, abs=0.01)
 
 
@@ -185,13 +200,31 @@ def test_output_plays_streaming_source_to_completion(tmp_path, stream):
     path = _ramp_wav(tmp_path / "long.wav", 2.0)
     source = probe_streaming_source(path, min_seconds=1.0)
     output = StreamingSoundDeviceOutput()
+    import threading
     completed = []
+    completion = threading.Event()
+    def on_complete():
+        """Observe completion regardless of manual/event-thread dispatch order."""
+        completed.append(True)
+        completion.set()
     try:
-        output.start(source, 0, lambda: completed.append(True))
-        output._fill.join(timeout=5.0)  # noqa: SLF001 - wait for the background fill
-
-        rendered = np.concatenate([stream[0].pull(4000) for _ in range(5)])
+        output.start(source, 0, on_complete)
+        # Pull only available frames, modelling a consumer without real time.
+        import time
+        fill = output._fill
+        chunks = []
+        while not fill.voice.complete or fill.voice.cursor < fill.voice.filled:
+            available = fill.voice.filled - fill.voice.cursor
+            if available:
+                chunks.append(stream[0].pull(min(512, available)))
+            else:
+                time.sleep(0.001)
+        rendered = np.concatenate(chunks)
+        # EOF may be published after the final PCM render. A persistent device
+        # keeps ticking; this final silent callback observes that publication.
+        assert np.all(stream[0].pull(1) == 0)
         output.dispatch_pending()
+        assert completion.wait(1)
 
         expected, _rate = sf.read(path, dtype="float32", always_2d=True)
         np.testing.assert_array_equal(rendered[:16000, 0], expected[:, 0])
@@ -220,3 +253,16 @@ def test_pause_cancels_fill_and_resume_restarts_from_position(tmp_path, stream):
         assert output._fill.voice.cursor == 1000  # noqa: SLF001
     finally:
         output.close()
+
+
+def test_ring_memory_is_independent_of_duration_and_seek(tmp_path):
+    """A one-hour header/late seek must still reserve only a fixed PCM ring."""
+    path = _ramp_wav(tmp_path / "tiny.wav", 0.1)
+    fills = [StreamFill(StreamingSource(path, 8000, 8000 * 3600, 1), offset,
+                        token=1, device_rate=48000, device_channels=2)
+             for offset in (0, 400)]
+    try:
+        assert [fill.voice.pcm.nbytes for fill in fills] == [48000 * 4, 48000 * 4]
+    finally:
+        for fill in fills:
+            fill.discard()

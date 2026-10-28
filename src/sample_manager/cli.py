@@ -1169,3 +1169,7 @@ def tag_parent_remove(
         raise typer.Exit(exit_codes.ERROR_GENERAL)
     finally:
         db.close()
+
+# Engine diagnostics use the same optional factory as interactive frontends.
+from .commands.engine_commands import register as register_engine_commands
+register_engine_commands(app)

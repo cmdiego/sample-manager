@@ -12,10 +12,11 @@ from rich.markup import escape
 
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
-from textual.containers import Container
+from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
-from textual.widgets import Static
+from textual.widgets import Static, OptionList, Button
+from .widgets.browse_columns import BrowseColumns
 
 from ..audio import AudioPlayer, PlaybackStatus, WaveformData, WaveformService
 from ..audio.decode_cache import shared_decode_cache
@@ -50,6 +51,8 @@ from .widgets.browser_zone import BrowserZone
 from .widgets.file_tree import SampleListWidget
 from .widgets.selection_list import SelectedFilesListWidget
 from .widgets.top_display import TopDisplayWidget
+from .widgets.transport import TransportBar
+from .widgets.waveform import WaveformWidget
 
 
 # Rows on each side of the cursor decoded ahead of time.
@@ -113,7 +116,11 @@ class SampleManagerApp(App):
         )
         self._waveform_service = (
             waveform_service if waveform_service is not None
-            else StoredWaveformService(decoder=shared_decode_cache())
+            else StoredWaveformService(decoder=(
+                self._audio_player.waveform_decoder
+                if isinstance(getattr(type(self._audio_player), "waveform_decoder", None), property)
+                else shared_decode_cache()
+            ))
         )
         self._metadata_reader = metadata_reader
         self._metadata_path: Path | None = None
@@ -123,6 +130,8 @@ class SampleManagerApp(App):
         self._state: NavState | None = None
         self._indexed: dict[str, int] = {}
         self._library_roots: tuple[Path, ...] = ()
+        self._view = "browse"
+        self._saved_search = None
         self._preview_focused = False
         self._active_pane = "browser"
         self._stage_items: tuple[NavItem, ...] = ()
@@ -133,16 +142,23 @@ class SampleManagerApp(App):
         self._scan_in_progress = False
         self._scan_message = ""
         self._analysis_cancel = threading.Event()
+        self._analysis_serial = threading.Lock()
         self._audio_poll_timer = None
+        self._transport_path: Path | None = None
         # Typeahead filter state
         self._filter_active: bool = False
         self._filter_query: str = ""
         self._filter_focused_index: int = 0
         self._filter_results: tuple[NavItem, ...] = ()
+        self._tag_filter: str | None = None
+        self._facet_key = None
+        self._facets: list[dict] = []
+        self._summaries: dict[int, dict] = {}
         self._last_auditioned_path: Path | None = None
         self._waveform_path: Path | None = None
         self._waveform_data: WaveformData | None = None
         self._waveform_generation = 0
+        self._waveform_identity = None
         # Waveform navigation mode state
         self._waveform_nav_active: bool = False
         self._nav_cursor_fraction: float = 0.0
@@ -157,10 +173,23 @@ class SampleManagerApp(App):
         """Keep browsing dominant and share a compact preview across both panes."""
         placeholder = NavState.initial(Path("/"), [])
         yield Static("Sample Manager · F4 Add Folder to begin", id="library-header", markup=False)
+        with Horizontal(id="view-tabs"):
+            for label, action in (("Browse", "browse"), ("Search", "search"), ("Stage", "stage"), ("Arrangements", "arrangements"), ("Settings", "settings")):
+                button = Button(label, id="view-" + action)
+                button.can_focus = False
+                yield button
         yield TopDisplayWidget(id="top-display")
         with Container(id="main-grid"):
             yield BrowserZone(placeholder, id="browser-zone")
             yield SelectedFilesListWidget(id="selection-list")
+        with Horizontal(id="stage-actions"):
+            for label, action in (("Tag all · Alt+T", "stage-tag-all"),
+                                  ("Arrange · Alt+4", "stage-arrange"),
+                                  ("Clear Stage · Alt+C", "stage-clear-all")):
+                button = Button(label, id=action)
+                button.can_focus = False
+                yield button
+        yield TransportBar(id="transport-bar")
         yield Static("F4 Add Folder · F2 Settings", id="status-bar", markup=False)
         yield Static("F1 Commands · ? Help · q Quit", id="shortcut-bar", markup=False)
 
@@ -172,7 +201,8 @@ class SampleManagerApp(App):
     # ── lifecycle ──────────────────────────────────────────────────────────
 
     def on_mount(self) -> None:
-        self._audio_poll_timer = self.set_interval(0.2, self._poll_audio)
+        self._audio_poll_timer = self.set_interval(1 / 30, self._poll_audio, pause=True)
+        self._apply_theme(self._preferences.theme)
         self.call_after_refresh(self._initialize)
 
     def _initialize(self) -> None:
@@ -222,11 +252,141 @@ class SampleManagerApp(App):
             self._db.close()
             self._db = None
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Views are explicit buttons; bulk actions share the service layer."""
+        action = event.button.id or ""
+        if action.startswith("view-"):
+            event.stop()
+            target = action.removeprefix("view-")
+            if target == "settings":
+                self.action_show_settings()
+            elif target == "arrangements":
+                self.action_show_arrangements()
+            else:
+                self._switch_view(target)
+        elif action == "stage-arrange":
+            event.stop()
+            self.action_show_arrangements()
+        elif action == "stage-tag-all":
+            event.stop()
+            self._bulk_tag_stage()
+        elif action == "stage-clear-all":
+            event.stop()
+            self._clear_stage_confirmed()
+
+    def _switch_view(self, view: str) -> None:
+        """Retain view-local search and the shared Stage/navigation cursors."""
+        if self._state is None:
+            return
+        self._leave_preview()
+        if self._filter_active or self._filter_query:
+            self._saved_search = (self._state.current_root, self._filter_query, self._filter_results, self._filter_focused_index, self._tag_filter)
+        self._filter_active, self._filter_query, self._filter_results = False, "", ()
+        self._view = view
+        self._active_pane = "stage" if view == "stage" else "browser"
+        if view == "search":
+            self._filter_active = True
+            if self._saved_search is not None and self._saved_search[0] == self._state.current_root:
+                _, self._filter_query, self._filter_results, self._filter_focused_index, self._tag_filter = self._saved_search
+                # Hidden views may outlive rescans/tag edits; retain cursor intent
+                # but rebuild membership before any action can use a stale ID.
+                self._reload_filter_results()
+        self.set_class(view == "stage", "stage-view")
+        self.set_class(view == "search", "search-view")
+        self._refresh_ui(audition=False)
+
+    def _profiles_path(self) -> Path:
+        """Respect this session's config rather than a global/default profile path."""
+        from ..profiles import get_profiles_dir
+        path = self._config_path or get_config_path()
+        return get_profiles_dir(load_config(path) if path.is_file() else {})
+
+    def action_show_arrangements(self) -> None:
+        """Open saved arrangement/preview/history workflows without changing Stage."""
+        if self._db is None or isinstance(self.screen, ModalScreen):
+            return
+        from .widgets.arrangements_screen import ArrangementsScreen
+        try:
+            self.push_screen(ArrangementsScreen(self._db.path, self._profiles_path(),
+                                               lambda: self._refresh_ui(audition=False)))
+        except Exception as exc:
+            self.notify(f"Could not open arrangements: {exc}", severity="error")
+
+    def _bulk_tag_stage(self) -> None:
+        """Apply a typed tag through the same validation as single-sample edits."""
+        if self._db is None:
+            return
+        ids = tuple(self._data.get_selection_ids())
+        def apply(text):
+            """Capture selected IDs before opening the modal."""
+            for sid in ids:
+                self._data.add_sample_tag(sid, text)
+            self._facet_key = None
+            self._refresh_ui(audition=False)
+        self.push_screen(StagePathScreen("Tag all Stage samples", f"Attach a tag to {len(ids)} samples.", apply))
+
+    def _clear_stage_confirmed(self) -> None:
+        """Clear persistent Stage only after reviewing the affected selection."""
+        if self._db is None:
+            return
+        from .widgets.confirm_screen import ConfirmScreen
+        from ..repos.selection_repo import SelectionRepo
+        def apply(yes):
+            """Cancellation leaves both virtual folders and samples untouched."""
+            if yes and self._db is not None:
+                SelectionRepo(self._db).clear()
+                self._stage_current_folder_id = None
+                self._refresh_ui(audition=False)
+        self.push_screen(ConfirmScreen(f"Clear {len(self._data.get_selection_ids())} staged samples and all virtual Stage folders? Source files stay in place.", "Clear Stage"), callback=apply)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Apply explicit column choices without stealing h/l directory keys."""
+        if event.option_list.id not in ("folder-column", "tag-column") or self._state is None:
+            return
+        event.stop()
+        columns = self.query_one(BrowseColumns)
+        self._active_pane = "browser"
+        if event.option_list.id == "folder-column":
+            path = columns.paths[event.option_index]
+            if path == self._state.current_dir.parent:
+                self._handle_go_back()
+            elif path != self._state.current_dir:
+                self._enter_browser_directory(path)
+        else:
+            self._tag_filter = columns.tags[event.option_index]
+            if self._tag_filter is None:
+                self._cancel_filter()
+            else:
+                self._filter_active = False
+                self._filter_query = "tag:" + self._tag_filter
+                self._filter_results = self._data.tagged_samples(self._state.current_root, self._tag_filter, self._state.current_dir)
+                self._filter_focused_index = 0
+                self._refresh_ui(audition=False)
+        for view in columns.query(OptionList):
+            view.can_focus = False
+        event.option_list.blur()
+
+    def action_focus_columns(self) -> None:
+        """Additive column entry leaves Tab and Ctrl-directional pane contracts intact."""
+        columns = self.query_one(BrowseColumns)
+        if self.has_class("narrow"):
+            self.notify("Folder/tag columns appear at 100 columns; widen the terminal.")
+            return
+        self._filter_active = False
+        for view in columns.query(OptionList):
+            view.can_focus = True
+        columns.query_one("#folder-column", OptionList).focus()
+
     # ── settings ───────────────────────────────────────────────────────────
 
     def get_system_commands(self, screen):
         """Make Settings searchable from Textual's existing command palette."""
         yield from super().get_system_commands(screen)
+        yield SystemCommand("Arrangements", "Save Stage, preview, export and revert", self.action_show_arrangements)
+        yield SystemCommand("Browse View", "Return to folder browsing", lambda: self._switch_view("browse"))
+        yield SystemCommand("Search View", "Restore library search", lambda: self._switch_view("search"))
+        yield SystemCommand("Stage View", "Work with Stage and bulk actions", lambda: self._switch_view("stage"))
+        yield SystemCommand("Browse Columns", "Focus folder/tag columns (Alt+Left/Right)", self.action_focus_columns)
         yield SystemCommand("Settings", "Audio output and auto-audition preferences", self.action_show_settings)
         yield SystemCommand("Add Folder", "Index a sample folder and select its library", self.action_add_library)
         yield SystemCommand("Rescan Library", "Index added, changed, and removed samples", self.action_rescan_library)
@@ -252,9 +412,30 @@ class SampleManagerApp(App):
             **kwargs,
         ))
 
-    def _save_preferences(self, preferences: TuiPreferences) -> None:
-        """Save explicitly and apply the choices without auditioning a sample."""
-        self._apply_preferences(preferences, persist=True)
+    async def _save_preferences(self, preferences: TuiPreferences) -> None:
+        """Keep device construction/closure and YAML writes off the UI thread."""
+        changed = any(getattr(preferences, key) != getattr(self._preferences, key)
+                      for key in ("audio_output", "engine", "buffer_frames", "cache_mb"))
+        replacement = await asyncio.to_thread(self._player_factory, preferences) if changed else None
+        try:
+            await asyncio.to_thread(save_tui_preferences, preferences, self._config_path)
+        except Exception:
+            if replacement is not None:
+                await asyncio.to_thread(replacement.close)
+            raise
+        old_player = None
+        if replacement is not None:
+            old_player, self._audio_player = self._audio_player, replacement
+            self._last_auditioned_path = None
+            if isinstance(self._waveform_service, StoredWaveformService) and isinstance(
+                getattr(type(replacement), "waveform_decoder", None), property
+            ):
+                self._waveform_service.bind_decoder(replacement.waveform_decoder)
+        self._preferences = preferences
+        self._apply_theme(preferences.theme)
+        if old_player is not None:
+            await asyncio.to_thread(old_player.close)
+        self._poll_audio()
         self._refresh_ui(audition=False)
         self.notify("Settings saved")
 
@@ -262,7 +443,8 @@ class SampleManagerApp(App):
         """Replace output only when necessary, and retain it if saving fails."""
         replacement = (
             self._player_factory(preferences)
-            if preferences.audio_output != self._preferences.audio_output else None
+            if any(getattr(preferences, key) != getattr(self._preferences, key)
+                   for key in ("audio_output", "engine", "buffer_frames", "cache_mb")) else None
         )
         try:
             if persist:
@@ -276,7 +458,39 @@ class SampleManagerApp(App):
             self._audio_player = replacement
             old_player.close()
             self._last_auditioned_path = None
+            if isinstance(self._waveform_service, StoredWaveformService) and isinstance(
+                getattr(type(replacement), "waveform_decoder", None), property
+            ):
+                self._waveform_service.bind_decoder(replacement.waveform_decoder)
         self._preferences = preferences
+        if self.is_running:
+            self._apply_theme(preferences.theme)
+
+    def _apply_theme(self, name: str) -> None:
+        """Use named neutral tokens, with optional validated YAML colour overrides."""
+        from textual.theme import Theme
+        tokens = dict(primary="#638fba", accent="#638fba")
+        if name == "light":
+            tokens.update(background="#f5f5f3", surface="#ffffff", panel="#e8e8e5", foreground="#242424")
+        else:
+            tokens.update(background="#181a1d", surface="#202328", panel="#282c32", foreground="#e5e6e8")
+        path = self._config_path or get_config_path()
+        if path.is_file():
+            config = load_config(path)
+            config = config if isinstance(config, dict) else {}
+            raw = config.get("tui", {}).get("theme_tokens", {}) if isinstance(config.get("tui"), dict) else {}
+            if isinstance(raw, dict):
+                from textual.color import Color
+                for key, value in raw.items():
+                    if key in tokens and isinstance(value, str):
+                        try:
+                            Color.parse(value)
+                        except Exception:
+                            continue  # Bad hand-edited tokens cannot prevent launch.
+                        tokens[key] = value
+        # Theme construction validates colour tokens before switching the view.
+        self.register_theme(Theme(name="sample-manager-" + name, dark=name == "dark", **tokens))
+        self.theme = "sample-manager-" + name
 
     # ── background library scanning ────────────────────────────────────────
 
@@ -369,30 +583,42 @@ class SampleManagerApp(App):
         """Analyse new and changed samples after a scan, off the UI thread."""
         if self._db is None or not hasattr(self._waveform_service, "bind_database"):
             return
+        self._analysis_cancel.set()
+        self._analysis_cancel = threading.Event()
         self.run_worker(
-            self._backfill_analysis(self._db.path, library_root_id),
+            self._backfill_analysis(self._db.path, library_root_id, self._analysis_cancel),
             name="analysis-backfill", group="analysis-backfill", exclusive=True,
             exit_on_error=False,
         )
 
-    async def _backfill_analysis(self, db_path: str, library_root_id: int) -> None:
+    async def _backfill_analysis(
+        self, db_path: str, library_root_id: int, cancel: threading.Event,
+    ) -> None:
+        """Cooperatively cancel old executor jobs and serialize actual passes."""
         def run():
-            with Db(db_path) as worker_db:
-                return backfill_analysis(
-                    worker_db,
-                    library_root_id=library_root_id,
-                    cancel=self._analysis_cancel,
-                    pause_seconds=ANALYSIS_BACKFILL_PAUSE_SECONDS,
-                )
+            """Only the latest uncancelled pass can reach decoding/storage."""
+            with self._analysis_serial:
+                if cancel.is_set():
+                    return None
+                with Db(db_path) as worker_db:
+                    return backfill_analysis(
+                        worker_db, library_root_id=library_root_id, cancel=cancel,
+                        pause_seconds=ANALYSIS_BACKFILL_PAUSE_SECONDS,
+                    )
 
         try:
             result = await asyncio.to_thread(run)
         except asyncio.CancelledError:
+            cancel.set()
             return
         except Exception as exc:  # noqa: BLE001 - analysis is optional; browsing keeps working
             self.notify(f"Sample analysis failed: {exc}", severity="warning", timeout=8)
             return
-        if result.analyzed and self.is_running:
+        if result is not None and result.failed and self.is_running:
+            self.notify(f"Analysis failed for {result.failed} samples; retry with sampleman analyze", severity="warning")
+        if result is not None and result.analyzed and self.is_running:
+            self._facet_key = None
+            self._refresh_ui(audition=False)
             self.notify(f"Analyzed {result.analyzed} samples", timeout=4)
 
     def _activate_added_library(self, root: Path) -> None:
@@ -415,6 +641,7 @@ class SampleManagerApp(App):
         """Preserve browsing/search focus and refresh Stage after index changes."""
         if self._state is None:
             return
+        self._facet_key = None
         selected = self._data.get_selection_ids()
         state = self._state.with_selection(selected)
         if state.current_root == scanned_root:
@@ -481,7 +708,11 @@ class SampleManagerApp(App):
             self._filter_results[self._filter_focused_index].path
             if 0 <= self._filter_focused_index < len(self._filter_results) else None
         )
-        self._filter_results = self._data.search_samples(self._state.current_root, self._filter_query)
+        self._filter_results = (
+            self._data.tagged_samples(self._state.current_root, self._tag_filter, self._state.current_dir)
+            if self._tag_filter and self._filter_query == "tag:" + self._tag_filter
+            else self._data.search_samples(self._state.current_root, self._filter_query)
+        )
         self._filter_focused_index = next(
             (index for index, item in enumerate(self._filter_results) if item.path == previous),
             max(0, min(self._filter_focused_index, len(self._filter_results) - 1)),
@@ -500,9 +731,12 @@ class SampleManagerApp(App):
             library_roots=list(self._library_roots),
         )
         self._state = self._restore_browser_cursor(self._state)
+        self._view = "browse"
+        self.remove_class("stage-view", "search-view")
         self._preview_focused = False
         self._active_pane = "browser"
         self._filter_active = False
+        self._tag_filter = None
         self._filter_query = ""
         self._filter_focused_index = 0
         self._filter_results = ()
@@ -539,13 +773,24 @@ class SampleManagerApp(App):
         if self._state is None:
             return
 
+        # One facet snapshot per library/scan/tag change, reused on cursor moves.
+        facet_key = (self._state.current_root, self._state.current_dir, len(self._indexed), self._scan_message)
+        if facet_key != self._facet_key and isinstance(self._data, TuiDataSource):
+            self._facets, self._summaries = self._data.browse_facets(self._state.current_root, self._state.current_dir)
+            self._facet_key = facet_key
+        self.query_one(BrowseColumns).update_choices(self._state, self._facets)
         # Build a filtered view of the current state for the sample list
         selection_ids = self._data.get_selection_ids()
         self._filter_results = tuple(
             replace(item, is_selected=item.sample_id in selection_ids)
             for item in self._filter_results
         )
-        filtered = self._visible_items()
+        filtered = tuple(
+            replace(item, duration_seconds=summary.get("duration_seconds"),
+                    loudness_lufs=summary.get("loudness_lufs"))
+            if (summary := self._summaries.get(item.sample_id)) is not None else item
+            for item in self._visible_items()
+        )
         # Keep the rendered cursor and the action target on the same filtered
         # index. The underlying directory cursor is left intact for Escape.
         filtered_index = min(self._filter_focused_index, len(filtered) - 1)
@@ -646,7 +891,7 @@ class SampleManagerApp(App):
         if index < 0 or not items:
             return
         nearest_first = []
-        for distance in range(1, PREFETCH_NEIGHBORS + 1):
+        for distance in range(1, self._preferences.prefetch_depth + 1):
             for position in (index + distance, index - distance):
                 if 0 <= position < len(items) and not items[position].is_dir:
                     nearest_first.append(items[position].path)
@@ -785,6 +1030,22 @@ class SampleManagerApp(App):
                 event.stop()
                 self.action_show_commands()
             return
+        view_action = resolve_key(event.key)
+        if view_action in ("view_browse", "view_search", "view_stage", "show_arrangements", "focus_columns", "stage_tag_all", "stage_clear"):
+            event.stop()
+            self._execute_command(view_action)
+            return
+        if self.screen_stack and isinstance(self.focused, OptionList) and self.focused.id in ("folder-column", "tag-column"):
+            if event.key in ("escape", "alt+right", "alt+left"):
+                event.stop()
+                if event.key == "escape":
+                    focused = self.focused
+                    for view in self.query_one(BrowseColumns).query(OptionList):
+                        view.can_focus = False
+                    focused.blur()
+                else:
+                    self.query_one("#tag-column" if event.key == "alt+right" else "#folder-column", OptionList).focus()
+            return
         # Directional controls bypass search typing and seeking, while modal
         # dialogs retain ownership of their keys through the guard above.
         # Legacy terminals send Ctrl+H as byte 0x08, which Textual names
@@ -890,6 +1151,13 @@ class SampleManagerApp(App):
             "stage_new_folder": self.action_stage_new_folder,
             "stage_move": self.action_stage_move,
             "stage_rename": self.action_stage_rename,
+            "focus_columns": self.action_focus_columns,
+            "show_arrangements": self.action_show_arrangements,
+            "stage_tag_all": self._bulk_tag_stage,
+            "stage_clear": self._clear_stage_confirmed,
+            "view_browse": lambda: self._switch_view("browse"),
+            "view_search": lambda: self._switch_view("search"),
+            "view_stage": lambda: self._switch_view("stage"),
         }
         if action in app_actions:
             app_actions[action]()
@@ -994,6 +1262,7 @@ class SampleManagerApp(App):
             return
         self._last_auditioned_path = item.path
         self._audio_player.play(item.path)
+        self._wake_transport()
 
     def _toggle_playback(self) -> None:
         """Pause or resume the current sample, starting the focus if idle."""
@@ -1012,6 +1281,7 @@ class SampleManagerApp(App):
         if item is not None and not item.is_dir:
             self._last_auditioned_path = item.path
             self._audio_player.play_from_start(item.path)
+        self._wake_transport()
         self._set_status(self._build_status())
 
     def _resume_playback(self) -> None:
@@ -1021,25 +1291,48 @@ class SampleManagerApp(App):
         playback = self._audio_player.snapshot()
         if playback.status is PlaybackStatus.PAUSED and playback.path is not None:
             self._audio_player.play(playback.path)
+        self._wake_transport()
         self._set_status(self._build_status())
 
+    def _wake_transport(self) -> None:
+        """Commands wake polling, including the loading interval before sound."""
+        if self._audio_poll_timer is not None:
+            self._audio_poll_timer.resume()
+
     def _poll_audio(self) -> None:
-        if self._state is not None:
-            # App timers can tick while screen children are being unmounted.
-            # Missing views mean teardown, not a playback failure.
-            try:
-                top_display = self.query_one("#top-display", TopDisplayWidget)
-            except NoMatches:
-                return
-            playback = self._audio_player.snapshot()
-            progress = 0.0
-            if playback.duration_seconds and playback.duration_seconds > 0:
-                progress = playback.position_seconds / playback.duration_seconds
-            top_display.set_playback_progress(
-                playback.path,
-                progress,
-            )
-            self._set_status(self._build_status())
+        """Refresh only transport/progress; stop polling when playback settles."""
+        try:
+            top_display = self.query_one("#top-display", TopDisplayWidget)
+            transport = self.query_one(TransportBar)
+        except NoMatches:
+            return
+        playback = self._audio_player.snapshot()
+        progress = playback.position_seconds / playback.duration_seconds if playback.duration_seconds else 0
+        top_display.set_playback_progress(playback.path, progress)
+        stats_fn = getattr(self._audio_player, "engine_stats", None)
+        stats = stats_fn() if stats_fn else {}
+        transport.update_playback(playback, stats if isinstance(stats, dict) else {})
+        if playback.path is not None and playback.path != self._transport_path:
+            self._transport_path = playback.path
+            transport.query_one(WaveformWidget).set_loading(playback.path)
+            self.run_worker(self._load_transport_waveform(playback.path),
+                            group="transport-waveform", exclusive=True, exit_on_error=False)
+        self._set_status(self._build_status())
+        if playback.status not in (PlaybackStatus.PLAYING, PlaybackStatus.LOADING):
+            if self._audio_poll_timer is not None:
+                self._audio_poll_timer.pause()
+
+    async def _load_transport_waveform(self, path: Path) -> None:
+        """Keep waveform completion tied to the sounding sample, not focus."""
+        try:
+            data = await asyncio.to_thread(self._waveform_service.load, path)
+            if self._transport_path == path:
+                self.query_one("#transport-waveform", WaveformWidget).set_data(data)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            if self.is_running and self._transport_path == path:
+                self.query_one("#transport-waveform", WaveformWidget).set_error(path, str(exc))
 
     # ── waveform navigation mode ───────────────────────────────────────────
 
@@ -1062,6 +1355,7 @@ class SampleManagerApp(App):
             snapshot = self._audio_player.snapshot()
             duration = snapshot.duration_seconds or 0.0
             self._audio_player.seek(self._nav_cursor_fraction * duration)
+            self._wake_transport()
         self._waveform_nav_active = False
         self._sync_nav_cursor()
 
@@ -1349,7 +1643,12 @@ class SampleManagerApp(App):
             self._waveform_data = None
             return
 
-        if item.path == self._waveform_path:
+        try:
+            stat = item.path.stat()
+            identity = (stat.st_size, stat.st_mtime_ns)
+        except OSError:
+            identity = None
+        if item.path == self._waveform_path and identity == self._waveform_identity:
             # The preview retains this sample's widget. Reapplying data would
             # reset its cursors; reapplying loading would erase a decode error.
             # Its original worker still owns any in-flight completion.
@@ -1358,6 +1657,7 @@ class SampleManagerApp(App):
         self._waveform_generation += 1
         generation = self._waveform_generation
         self._waveform_path = item.path
+        self._waveform_identity = identity
         self._waveform_data = None
         top_display.set_waveform_loading(item.path)
         self.run_worker(
@@ -1400,6 +1700,7 @@ class SampleManagerApp(App):
         self._preview_focused = False
         self._active_pane = "browser"
         self._filter_active = True
+        self._tag_filter = None
         self._filter_query = ""
         self._filter_focused_index = 0
         self._filter_results = ()
@@ -1441,6 +1742,9 @@ class SampleManagerApp(App):
         """Move keyboard actions between Browser and the persistent Stage."""
         self._leave_preview()
         self._active_pane = "stage" if self._active_pane == "browser" else "browser"
+        if self._view in ("stage", "search"):
+            self._view = "browse"
+            self.remove_class("stage-view", "search-view")
         if self._active_pane == "stage":
             # Stop search typing when leaving Browser, retaining its directory cursor.
             self._filter_active = False
@@ -1452,6 +1756,7 @@ class SampleManagerApp(App):
     def _cancel_filter(self) -> None:
         """Restore the directory cursor and leave typeahead mode."""
         self._filter_active = False
+        self._tag_filter = None
         self._filter_query = ""
         self._filter_focused_index = 0
         self._filter_results = ()

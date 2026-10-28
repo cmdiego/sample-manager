@@ -88,10 +88,22 @@ def analysis_row(analysis: ScanAnalysis, *, size_bytes: int, mtime_ns: int) -> d
     }
 
 
-def store_analysis(db: Db, sample_id: int, path: Path, audio: DecodedAudio) -> ScanAnalysis:
-    """Analyse decoded *audio* and store it against the file's current identity."""
-    size_bytes, mtime_ns = _file_identity(path)
+def store_analysis(
+    db: Db, sample_id: int, path: Path, audio: DecodedAudio,
+    *, identity: tuple[int, int], cancel: threading.Event | None = None,
+) -> ScanAnalysis:
+    """Store PCM only against the identity captured before its decode.
+
+    A changed/deleted file or cancelled job must never acquire a valid row for
+    stale PCM. The final row retains the old identity even if a change happens
+    immediately after the last stat, so subsequent readers still reject it.
+    """
+    size_bytes, mtime_ns = identity
+    if _file_identity(path) != identity:
+        raise ValueError("Sample changed during decoding")
     analysis = analyze_decoded(audio)
+    if _file_identity(path) != identity or (cancel is not None and cancel.is_set()):
+        raise ValueError("Sample changed or analysis was cancelled")
     SampleAnalysisRepo(db).upsert(
         sample_id, analysis_row(analysis, size_bytes=size_bytes, mtime_ns=mtime_ns)
     )
@@ -113,8 +125,15 @@ class StoredWaveformService:
         self._bucket_count = bucket_count
         self._fallback = WaveformService(decoder=decoder, bucket_count=bucket_count)
         self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sample-analysis")
-        self._pending: set[int] = set()
+        self._pending: set[tuple[str, int]] = set()
+        self._closed = threading.Event()
+        self.last_error: str | None = None
         self._lock = threading.Lock()
+
+    def bind_decoder(self, decoder: Callable[[Path], DecodedAudio]) -> None:
+        """Follow player/cache replacement without retaining the old decode cache."""
+        self._decoder = decoder
+        self._fallback = WaveformService(decoder=decoder, bucket_count=self._bucket_count)
 
     def bind_database(self, db_path: str | Path | None) -> None:
         """Use *db_path* for stored analysis; ``None`` turns storage off."""
@@ -124,7 +143,8 @@ class StoredWaveformService:
         requested = Path(path)
         if self._db_path is None:
             return self._fallback.load(requested)
-        with Db(self._db_path) as db:
+        db_path = self._db_path
+        with Db(db_path) as db:
             sample_id = resolve_sample_id(db, requested)
             if sample_id is None:
                 return self._fallback.load(requested)
@@ -143,8 +163,11 @@ class StoredWaveformService:
             )
 
         audio = self._decoder(requested)
+        identity = (size_bytes, mtime_ns)
+        if _file_identity(requested) != identity:
+            raise ValueError("Sample changed during waveform decoding; focus it again")
         pyramid = compute_peak_pyramid(audio.samples)
-        self._store_later(sample_id, requested, audio)
+        self._store_later(sample_id, requested, audio, identity, db_path)
         # Match what the stored row will return on the next focus.
         peak_levels, blob = encode_pyramid(pyramid)
         return WaveformData(
@@ -166,31 +189,38 @@ class StoredWaveformService:
         self._writer.submit(lambda: None).result(timeout)
 
     def close(self) -> None:
+        """Cancel writes, including analysis already running on the writer."""
+        self._closed.set()
         self._writer.shutdown(wait=False, cancel_futures=True)
 
-    def _store_later(self, sample_id: int, path: Path, audio: DecodedAudio) -> None:
+    def _store_later(
+        self, sample_id: int, path: Path, audio: DecodedAudio,
+        identity: tuple[int, int], db_path: str,
+    ) -> None:
+        """Bound queued PCM retention and carry the original database/identity."""
+        key = (db_path, sample_id)
         with self._lock:
-            if sample_id in self._pending:
+            if self._closed.is_set() or key in self._pending or len(self._pending) >= 2:
                 return
-            self._pending.add(sample_id)
-        db_path = self._db_path
+            self._pending.add(key)
 
         def store() -> None:
+            """Revalidate on the writer thread before committing derived data."""
             try:
-                if db_path is not None:
+                if not self._closed.is_set():
                     with Db(db_path) as db:
-                        store_analysis(db, sample_id, path, audio)
-            except Exception:  # noqa: BLE001 - storage is an optimisation; retry on next focus
-                pass
+                        store_analysis(db, sample_id, path, audio, identity=identity, cancel=self._closed)
+            except Exception as exc:  # browsing can continue; retry on later focus
+                self.last_error = str(exc)
             finally:
                 with self._lock:
-                    self._pending.discard(sample_id)
+                    self._pending.discard(key)
 
         try:
             self._writer.submit(store)
-        except RuntimeError:  # shut down
+        except RuntimeError:  # shutdown raced with submission
             with self._lock:
-                self._pending.discard(sample_id)
+                self._pending.discard(key)
 
 
 def _fit(finest, bucket_count: int):
@@ -235,12 +265,18 @@ def backfill_analysis(
             skipped += 1
         else:
             try:
-                store_analysis(db, int(row["sample_id"]), path, decoder(path))
+                store_analysis(
+                    db, int(row["sample_id"]), path, decoder(path),
+                    identity=(size_bytes, mtime_ns), cancel=cancel,
+                )
                 analyzed += 1
             except Exception:  # noqa: BLE001 - one bad file never stops the pass
                 failed += 1
             if pause_seconds:
-                time.sleep(pause_seconds)
+                if cancel is not None:
+                    cancel.wait(pause_seconds)
+                else:
+                    time.sleep(pause_seconds)
         if on_progress is not None:
             on_progress(index, total)
     return BackfillResult(analyzed, skipped, failed)
